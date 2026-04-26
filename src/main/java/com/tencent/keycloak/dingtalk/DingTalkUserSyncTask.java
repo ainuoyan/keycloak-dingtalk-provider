@@ -184,7 +184,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         boolean createUsers = isCreateUsersEnabled(config);
         boolean disableMissingUsers = isDisableMissingUsersEnabled(config);
         boolean reenableUsers = isReenableUsersEnabled(config);
-        boolean detailedLog = force || isDetailedLogEnabled(config);
+        boolean detailedLog = isDetailedLogEnabled(config);
         boolean includeChildDepartments = isIncludeChildDepartmentsEnabled(config);
         boolean overwriteExisting = Boolean.parseBoolean(
                 config.getOrDefault(PERIODIC_SYNC_OVERWRITE_EXISTING, "false"));

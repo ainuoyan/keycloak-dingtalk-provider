@@ -28,6 +28,18 @@ public class DingTalkSyncBrowserResource {
     @GET
     @Path("debug")
     public Response debugSync(@QueryParam("alias") String alias, @QueryParam("key") String key) {
+        return sync(alias, key, null, true);
+    }
+
+    @GET
+    @Path("run")
+    public Response runSync(@QueryParam("alias") String alias,
+                            @QueryParam("key") String key,
+                            @QueryParam("confirm") String confirm) {
+        return sync(alias, key, confirm, false);
+    }
+
+    private Response sync(String alias, String key, String confirm, boolean dryRun) {
         RealmModel realm = session.getContext().getRealm();
         if (realm == null) {
             return json(Response.Status.NOT_FOUND, Map.of("error", "realm_not_found"));
@@ -35,53 +47,36 @@ public class DingTalkSyncBrowserResource {
         if (StringUtils.isBlank(alias)) {
             return json(Response.Status.BAD_REQUEST, Map.of("error", "alias_required"));
         }
+        if (!dryRun && !DingTalkSyncAdminResource.RUN_CONFIRM.equals(confirm)) {
+            return json(Response.Status.BAD_REQUEST, Map.of(
+                    "error", "confirm_required",
+                    "confirm", DingTalkSyncAdminResource.RUN_CONFIRM
+            ));
+        }
 
-        IdentityProviderModel idp = realm.getIdentityProvidersStream()
-                .filter(provider -> DingTalkIdentityProviderFactory.PROVIDER_ID.equals(provider.getProviderId()))
-                .filter(IdentityProviderModel::isEnabled)
-                .filter(provider -> alias.equals(provider.getAlias()))
-                .findFirst()
-                .orElse(null);
+        IdentityProviderModel idp = getDingTalkProvider(realm, alias);
         if (idp == null) {
             return json(Response.Status.NOT_FOUND, Map.of("error", "dingtalk_idp_not_found", "alias", alias));
         }
-        if (!DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(idp)) {
-            return json(Response.Status.FORBIDDEN, Map.of("error", "get_debug_disabled", "alias", alias));
-        }
-
-        String configuredKey = idp.getConfig().get(DingTalkIdentityProviderFactory.BROWSER_SYNC_DEBUG_KEY);
-        if (StringUtils.isBlank(configuredKey)) {
-            return json(Response.Status.FORBIDDEN, Map.of("error", "browser_debug_disabled", "alias", alias));
-        }
-        if (!constantTimeEquals(configuredKey, key)) {
-            logger.warnf("Rejected DingTalk browser sync debug request. realm=%s, idp=%s",
-                    realm.getName(), alias);
-            return json(Response.Status.FORBIDDEN, Map.of("error", "invalid_debug_key", "alias", alias));
+        Response forbidden = validateBrowserAccess(realm, idp, alias, key);
+        if (forbidden != null) {
+            return forbidden;
         }
 
         RealmModel previousRealm = session.getContext().getRealm();
         try {
             session.getContext().setRealm(realm);
-            DingTalkUserSyncTask.SyncResult result = new DingTalkUserSyncTask()
-                    .previewProviderNow(session, realm, alias);
-            return Response.ok(Map.ofEntries(
-                    Map.entry("alias", result.alias()),
-                    Map.entry("dryRun", true),
-                    Map.entry("listed", result.listed()),
-                    Map.entry("matched", result.matched()),
-                    Map.entry("created", result.created()),
-                    Map.entry("linked", result.linked()),
-                    Map.entry("updated", result.updated()),
-                    Map.entry("reenabled", result.reenabled()),
-                    Map.entry("disabled", result.disabled()),
-                    Map.entry("skipped", result.skipped()),
-                    Map.entry("reason", result.reason() == null ? "" : result.reason())
-            ), MediaType.APPLICATION_JSON_TYPE).build();
+            DingTalkUserSyncTask syncTask = new DingTalkUserSyncTask();
+            DingTalkUserSyncTask.SyncResult result = dryRun
+                    ? syncTask.previewProviderNow(session, realm, alias)
+                    : syncTask.syncProviderNow(session, realm, alias);
+            return syncResultResponse(result, dryRun);
         } catch (Exception e) {
-            logger.errorf(e, "DingTalk browser sync preview failed. realm=%s, idp=%s",
-                    realm.getName(), alias);
+            logger.errorf(e, "DingTalk browser sync failed. realm=%s, idp=%s, dryRun=%s",
+                    realm.getName(), alias, dryRun);
             return json(Response.Status.INTERNAL_SERVER_ERROR,
-                    Map.of("error", "sync_preview_failed", "alias", alias, "message", StringUtils.defaultString(e.getMessage())));
+                    Map.of("error", "sync_failed", "alias", alias, "dryRun", dryRun,
+                            "message", StringUtils.defaultString(e.getMessage())));
         } finally {
             session.getContext().setRealm(previousRealm);
         }
@@ -128,34 +123,55 @@ public class DingTalkSyncBrowserResource {
         return Response.status(status).type(MediaType.APPLICATION_JSON_TYPE).entity(body).build();
     }
 
-    private IdentityProviderModel getAuthorizedDingTalkProvider(RealmModel realm, String alias, String key) {
+    private Response syncResultResponse(DingTalkUserSyncTask.SyncResult result, boolean dryRun) {
+        return Response.ok(Map.ofEntries(
+                Map.entry("alias", result.alias()),
+                Map.entry("dryRun", dryRun),
+                Map.entry("listed", result.listed()),
+                Map.entry("matched", result.matched()),
+                Map.entry("created", result.created()),
+                Map.entry("linked", result.linked()),
+                Map.entry("updated", result.updated()),
+                Map.entry("reenabled", result.reenabled()),
+                Map.entry("disabled", result.disabled()),
+                Map.entry("skipped", result.skipped()),
+                Map.entry("reason", result.reason() == null ? "" : result.reason())
+        ), MediaType.APPLICATION_JSON_TYPE).build();
+    }
+
+    private IdentityProviderModel getDingTalkProvider(RealmModel realm, String alias) {
         if (realm == null || StringUtils.isBlank(alias)) {
             return null;
         }
-
-        IdentityProviderModel idp = realm.getIdentityProvidersStream()
+        return realm.getIdentityProvidersStream()
                 .filter(provider -> DingTalkIdentityProviderFactory.PROVIDER_ID.equals(provider.getProviderId()))
                 .filter(IdentityProviderModel::isEnabled)
                 .filter(provider -> alias.equals(provider.getAlias()))
                 .findFirst()
                 .orElse(null);
-        if (idp == null) {
-            return null;
-        }
+    }
+
+    private IdentityProviderModel getAuthorizedDingTalkProvider(RealmModel realm, String alias, String key) {
+        IdentityProviderModel idp = getDingTalkProvider(realm, alias);
+        return idp != null && validateBrowserAccess(realm, idp, alias, key) == null ? idp : null;
+    }
+
+    private Response validateBrowserAccess(RealmModel realm, IdentityProviderModel idp, String alias, String key) {
         if (!DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(idp)) {
-            logger.warnf("Rejected DingTalk browser debug request because GET debug is disabled. realm=%s, idp=%s",
+            logger.warnf("Rejected DingTalk browser sync request because GET debug is disabled. realm=%s, idp=%s",
                     realm.getName(), alias);
-            return null;
+            return json(Response.Status.FORBIDDEN, Map.of("error", "get_debug_disabled", "alias", alias));
         }
-
         String configuredKey = idp.getConfig().get(DingTalkIdentityProviderFactory.BROWSER_SYNC_DEBUG_KEY);
-        if (StringUtils.isBlank(configuredKey) || !constantTimeEquals(configuredKey, key)) {
-            logger.warnf("Rejected DingTalk browser debug request. realm=%s, idp=%s",
-                    realm.getName(), alias);
-            return null;
+        if (StringUtils.isBlank(configuredKey)) {
+            return json(Response.Status.FORBIDDEN, Map.of("error", "browser_debug_disabled", "alias", alias));
         }
-
-        return idp;
+        if (!constantTimeEquals(configuredKey, key)) {
+            logger.warnf("Rejected DingTalk browser sync request. realm=%s, idp=%s",
+                    realm.getName(), alias);
+            return json(Response.Status.FORBIDDEN, Map.of("error", "invalid_debug_key", "alias", alias));
+        }
+        return null;
     }
 
     private boolean constantTimeEquals(String expected, String actual) {
