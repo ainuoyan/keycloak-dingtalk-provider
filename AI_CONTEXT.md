@@ -14,6 +14,7 @@
 - 支持定期或手动同步钉钉通讯录到 Keycloak。
 - 支持用浏览器临时 dry-run 或正式执行同步，但必须受调试开关和密钥保护。
 - 支持清理由钉钉同步任务自动创建的 Keycloak 用户。
+- 支持用钉钉自定义机器人通知登录或同步真实执行中新创建的用户，以及同步真实执行中跳过创建用户的 WARN。
 
 ## 核心文件地图
 
@@ -25,6 +26,7 @@
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncAdminResource.java` | 管理端 REST 入口，需要 `manage-users` 权限 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResource.java` | 浏览器公开入口，不需要 Bearer token，但必须开启 GET 调试开关并提供调试密钥 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.java` | 清理由钉钉同步自动创建的 Keycloak 用户 |
+| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkWebhookNotifier.java` | 钉钉自定义机器人通知，支持加签、登录创建通知和同步批量通知 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkLoginEventListenerProvider.java` | 登录/注册事件监听，给历史钉钉用户补齐企业插件角色 |
 | `src/main/java/com/tencent/keycloak/dingtalk/PinyinUsername.java` | 中文姓名转拼音 username 规则 |
 | `README.md` | 用户文档、配置说明、接口说明 |
@@ -118,6 +120,29 @@
 - `DingTalkSyncBrowserResource.sync`
 - `DingTalkSyncBrowserResource.previewSyncCreatedUserCleanup`
 
+### 钉钉机器人通知
+
+通知由 `notificationWebhookEnabled` 和 `notificationWebhookUrl` 共同控制，`notificationWebhookSecret` 可选用于钉钉机器人加签。
+
+发送范围：
+
+- 登录链路新创建 Keycloak 用户。
+- 同步真实执行中新创建 Keycloak 用户。
+- 同步真实执行中，因生成 username 为空或 username 已存在但无可信匹配而跳过创建的 WARN。
+
+关键边界：
+
+- dry-run 不发送通知。
+- 发送失败不能中断登录或同步，只能记录 WARN。
+- 通知内容必须脱敏，不输出手机号、邮箱、token、secret、Webhook access_token 或加签密钥。
+- 同步通知必须批量汇总，避免每个用户一条消息刷屏。
+
+关键文件：
+
+- `DingTalkWebhookNotifier.java`
+- `DingTalkIdentityProvider.importNewUser`
+- `DingTalkUserSyncTask.createUser`
+
 ## REST 入口清单
 
 ### 管理端入口
@@ -188,6 +213,8 @@ dry-run 必须尽量反映真实执行会发生的变化，但不能写入用户
 
 注意：同步完成的汇总日志 `DingTalk sync finished...` 不受明细日志开关控制，属于正常摘要日志。
 
+钉钉机器人通知不受 `periodicSyncDetailedLog` 控制。它只受 `notificationWebhookEnabled`、`notificationWebhookUrl` 和 dry-run 状态控制。
+
 ## 构建与验证
 
 常用命令：
@@ -197,7 +224,7 @@ mvn test
 mvn clean package
 git diff --check
 shasum -a 256 dist/keycloak-dingtalk-provider.jar target/keycloak-dingtalk-provider.jar
-jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup|NumericUserCleanup)"
+jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup|WebhookNotifier|NumericUserCleanup)"
 ```
 
 期望：
@@ -206,7 +233,7 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup
 - `mvn clean package` 通过。
 - `git diff --check` 无输出。
 - 如果更新了可部署包，`dist/keycloak-dingtalk-provider.jar` 应与 `target/keycloak-dingtalk-provider.jar` SHA 一致。
-- JAR 中应有 `DingTalkSyncCreatedUserCleanup`，不应有旧的 `DingTalkNumericUserCleanup`。
+- JAR 中应有 `DingTalkSyncCreatedUserCleanup` 和 `DingTalkWebhookNotifier`，不应有旧的 `DingTalkNumericUserCleanup`。
 
 ## 发布包注意事项
 
@@ -230,6 +257,7 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup
 - dry-run 统计是否明显低报真实执行会发生的创建、绑定、更新、启用、禁用。
 - 任一部门拉取失败时，离职禁用是否会被跳过。
 - 日志是否泄露手机号、邮箱、token、secret、OAuth code、state。
+- 钉钉机器人通知是否只在真实执行时发送，是否脱敏，发送失败是否不会中断主流程。
 - README 中的 URL、确认口令、权限说明是否和代码一致。
 - `dist` JAR 是否和当前源码构建结果一致。
 
@@ -241,3 +269,4 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup
 - 不要把 `dingtalk_managed=true` 直接等同于“可删除用户”。
 - 不要在 dry-run 中调用任何会改变 Keycloak 状态的方法。
 - 不要在日志里输出完整 access token、client secret、手机号、邮箱、userid、unionid、openid。
+- 不要把 Webhook access_token 或加签密钥写入日志或通知正文。

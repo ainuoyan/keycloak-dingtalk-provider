@@ -250,6 +250,12 @@ class DingTalkIdentityProviderTest {
         assertFalse(DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(Map.of()));
         assertTrue(DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(
                 Map.of("syncGetDebugEnabled", "true")));
+        assertFalse(DingTalkWebhookNotifier.isEnabled(Map.of()));
+        assertFalse(DingTalkWebhookNotifier.isEnabled(Map.of(
+                "notificationWebhookEnabled", "true")));
+        assertTrue(DingTalkWebhookNotifier.isEnabled(Map.of(
+                "notificationWebhookEnabled", "true",
+                "notificationWebhookUrl", "https://oapi.dingtalk.com/robot/send?access_token=token")));
 
         assertEquals(Set.of("phone"), DingTalkUserSyncTask.parseSyncFields(null));
         assertEquals(Set.of("phone", "email"),

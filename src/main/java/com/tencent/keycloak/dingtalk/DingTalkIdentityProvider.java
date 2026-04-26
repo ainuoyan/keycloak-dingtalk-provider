@@ -407,6 +407,16 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         
         // 按配置分配当前企业对应的 ent-member 和 ent-plugin-enabled 角色
         grantEnterpriseRoles(realm, user, context);
+
+        DingTalkWebhookNotifier.notifyLoginUserCreated(
+                session,
+                realm,
+                context.getIdpConfig(),
+                user,
+                context.getId(),
+                context.getUserAttribute(DINGTALK_USER_ID),
+                StringUtils.isNotBlank(context.getUserAttribute(PHONE_NUMBER)),
+                StringUtils.isNotBlank(context.getEmail()));
         
         logger.infof("Successfully imported new DingTalk user: %s", user.getUsername());
     }

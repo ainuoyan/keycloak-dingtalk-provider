@@ -200,6 +200,8 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                     parseDepartmentIds(config.get(PERIODIC_SYNC_DEPARTMENT_IDS)), includeChildDepartments,
                     matchRules, syncFields, createUsers, disableMissingUsers, overwriteExisting);
         }
+        DingTalkWebhookNotifier.Batch notifications = DingTalkWebhookNotifier.syncBatch(
+                session, realm, idp, force ? "manual" : "periodic", dryRun);
 
         int listed = 0;
         int matched = 0;
@@ -282,7 +284,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                         continue;
                     }
                     Optional<ProvisionResult> provisionResult = createUsers
-                            ? createUser(session, realm, idp, dingtalkUser)
+                            ? createUser(session, realm, idp, dingtalkUser, notifications)
                             : Optional.empty();
                     if (provisionResult.isEmpty()) {
                         if (detailedLog) {
@@ -363,6 +365,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
 
         logger.infof("DingTalk sync finished. realm=%s, idp=%s, dryRun=%s, listed=%d, matched=%d, created=%d, linked=%d, updated=%d, reenabled=%d, disabled=%d",
                 realm.getName(), idp.getAlias(), dryRun, listed, matched, created, linked, updated, reenabled, disabled);
+        notifications.flush();
 
         return new SyncResult(idp.getAlias(), listed, matched, created, linked, updated, reenabled, disabled, false, null);
     }
@@ -541,17 +544,22 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     }
 
     private Optional<ProvisionResult> createUser(KeycloakSession session, RealmModel realm,
-                                                 IdentityProviderModel idp, UserDto dingtalkUser) {
+                                                 IdentityProviderModel idp, UserDto dingtalkUser,
+                                                 DingTalkWebhookNotifier.Batch notifications) {
         String username = resolveProvisionedUsername(dingtalkUser);
+        String describedUser = describeDingTalkUser(dingtalkUser);
         if (StringUtils.isBlank(username)) {
-            logger.warn("Skip creating Keycloak user from DingTalk: username is empty");
+            logger.warnf("Skip creating Keycloak user from DingTalk: username is empty. realm=%s, idp=%s, dingtalkUser=%s",
+                    realm.getName(), idp.getAlias(), describedUser);
+            notifications.addSkippedCreate("", "username is empty", describedUser);
             return Optional.empty();
         }
 
         UserModel existing = session.users().getUserByUsername(realm, username);
         if (existing != null) {
             logger.warnf("Skip creating Keycloak user from DingTalk: username already exists and no trusted match was found. realm=%s, username=%s, dingtalkUser=%s",
-                    realm.getName(), username, describeDingTalkUser(dingtalkUser));
+                    realm.getName(), username, describedUser);
+            notifications.addSkippedCreate(username, "username already exists and no trusted match", describedUser);
             return Optional.empty();
         }
 
@@ -574,6 +582,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
 
         logger.infof("Created Keycloak user from DingTalk. realm=%s, username=%s",
                 realm.getName(), user.getUsername());
+        notifications.addCreatedUser(user.getUsername(), describedUser);
         return Optional.of(new ProvisionResult(user, true, "created"));
     }
 
