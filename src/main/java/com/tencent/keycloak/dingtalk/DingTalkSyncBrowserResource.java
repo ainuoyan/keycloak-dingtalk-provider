@@ -34,7 +34,8 @@ public class DingTalkSyncBrowserResource {
 
     @GET
     @Path("endpoints")
-    public Response endpoints(@QueryParam("alias") String alias,
+    public Response endpoints(@QueryParam("realm") String requestedRealm,
+                              @QueryParam("alias") String alias,
                               @QueryParam("key") String key,
                               @Context UriInfo uriInfo) {
         RealmModel realm = session.getContext().getRealm();
@@ -43,6 +44,10 @@ public class DingTalkSyncBrowserResource {
                     .type(MediaType.TEXT_PLAIN_TYPE)
                     .entity("Realm not found")
                     .build();
+        }
+        String requestedRealmName = StringUtils.trimToNull(requestedRealm);
+        if (requestedRealmName != null && !requestedRealmName.equals(realm.getName())) {
+            return redirectToRealmEndpoint(realm, requestedRealmName, alias, key, uriInfo);
         }
 
         List<String> aliases = getDingTalkProviderAliases(realm);
@@ -339,7 +344,7 @@ public class DingTalkSyncBrowserResource {
                 .append("main{max-width:1120px;margin:0 auto;padding:28px 20px 48px}")
                 .append("h1{font-size:24px;margin:0 0 8px}h2{font-size:18px;margin:0 0 8px}p{line-height:1.6}.muted{color:#666}")
                 .append(".panel{background:#fff;border:1px solid #d8d8d8;border-radius:6px;padding:18px;margin:18px 0}")
-                .append("label{display:block;font-weight:600;margin:0 0 6px}.formgrid{display:grid;grid-template-columns:1fr 1fr auto;gap:14px;align-items:end}")
+                .append("label{display:block;font-weight:600;margin:0 0 6px}.formgrid{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:14px;align-items:end}")
                 .append("input,select{box-sizing:border-box;width:100%;height:38px;border:1px solid #8a8d90;border-radius:4px;padding:6px 10px;font-size:14px;background:white}")
                 .append("button,.open{height:38px;border:1px solid #0066cc;background:#0066cc;color:white;border-radius:4px;padding:0 14px;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}")
                 .append("button.secondary{border-color:#8a8d90;background:white;color:#151515}.open.warn{background:#b13800;border-color:#b13800}.disabled{border-color:#d2d2d2!important;background:#f0f0f0!important;color:#777!important;cursor:not-allowed!important}")
@@ -371,7 +376,10 @@ public class DingTalkSyncBrowserResource {
                     .append("</strong>。浏览器 GET 入口还需要填写正确的浏览器同步调试密钥。</div>");
         }
 
-        html.append("<section class=\"panel\"><form method=\"get\"><div class=\"formgrid\"><div><label for=\"alias\">钉钉 IdP alias</label>");
+        html.append("<section class=\"panel\"><form method=\"get\"><div class=\"formgrid\">")
+                .append("<div><label for=\"realm\">Realm</label><input id=\"realm\" name=\"realm\" autocomplete=\"off\" value=\"")
+                .append(escapeHtml(realm.getName()))
+                .append("\"></div><div><label for=\"alias\">钉钉 IdP alias</label>");
         if (aliases.isEmpty()) {
             html.append("<input id=\"alias\" name=\"alias\" value=\"").append(escapeHtml(alias)).append("\">");
         } else {
@@ -402,6 +410,23 @@ public class DingTalkSyncBrowserResource {
                 .append("document.querySelectorAll('[data-copy]').forEach(function(btn){btn.addEventListener('click',async function(){try{await navigator.clipboard.writeText(btn.getAttribute('data-copy'));var old=btn.textContent;btn.textContent='已复制';setTimeout(function(){btn.textContent=old},1200)}catch(e){btn.textContent='复制失败'}})});")
                 .append("</script></main></body></html>");
         return html.toString();
+    }
+
+    private Response redirectToRealmEndpoint(RealmModel currentRealm, String requestedRealm, String alias, String key,
+                                             UriInfo uriInfo) {
+        String base = externalServerRoot(uriInfo, currentRealm) + "/realms/" + urlEncodePath(requestedRealm) + "/"
+                + DingTalkSyncBrowserResourceProviderFactory.PROVIDER_ID;
+        List<String> queryPairs = new ArrayList<>();
+        if (StringUtils.isNotBlank(alias)) {
+            queryPairs.add("alias");
+            queryPairs.add(alias);
+        }
+        if (StringUtils.isNotBlank(key)) {
+            queryPairs.add("key");
+            queryPairs.add(key);
+        }
+        String target = endpointUrl(base, "endpoints", queryPairs.toArray(new String[0]));
+        return Response.seeOther(URI.create(target)).build();
     }
 
     private void appendEndpointSection(StringBuilder html, String title, String description,

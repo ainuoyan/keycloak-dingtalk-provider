@@ -167,12 +167,12 @@ services:
 | 启用钉钉机器人通知 | 默认关闭；开启并配置 Webhook 后，登录链路新创建用户、同步真实执行中新创建用户，以及同步真实执行中因 `username` 为空或 `username` 冲突跳过创建的 WARN 会发送到钉钉机器人 |
 | 钉钉机器人 Webhook 地址 | 钉钉自定义机器人 Webhook 地址，通常包含 `access_token`，按敏感字段保存；为空时不发送通知 |
 | 钉钉机器人加签密钥 | 如果钉钉机器人启用了加签安全设置，填写 `SEC...` 密钥；未启用加签时留空 |
-| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址可通过后台下方的“接口地址页面模板”入口查看 |
+| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址可通过后台下方的“接口地址页面入口”查看 |
 | 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览、正式同步和 Webhook 测试 |
 
-> 后台会显示一个固定的“接口地址页面模板”入口：`/realms/{realm}/dingtalk-sync/endpoints`。这是展示用模板，不会在插件启动时写入或更新 IdP 配置；把 `{realm}` 替换为当前 realm 后打开页面，即可选择钉钉 IdP、临时填写本次浏览器同步调试密钥。页面会把地址分为两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由 REST Provider 路由决定。
+> 后台会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这是展示用入口，不会在插件启动时写入或更新 IdP 配置；打开页面后可以在页面内填写/切换 Realm、选择钉钉 IdP、临时填写本次浏览器同步调试密钥。页面会把地址分为两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由页面选择的 Realm 对应 REST Provider 路由决定。
 
-> Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该组件。插件因此只在配置页放一个固定入口模板，访问按钮和复制按钮放在插件自己的接口地址页面里。该入口模板不参与运行配置，插件运行时不会读取它。
+> Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该组件。插件因此只在配置页放一个固定入口路径，访问按钮和复制按钮放在插件自己的接口地址页面里。该入口路径不参与运行配置，插件运行时不会读取它。
 
 > `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 
@@ -249,15 +249,15 @@ https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?***
 如需页面化查看浏览器 GET 地址和管理端 POST API 地址，可以访问插件接口地址页面：
 
 ```text
-https://your-keycloak-domain/realms/{realm}/dingtalk-sync/endpoints?alias={idpAlias}
+https://your-keycloak-domain/realms/master/dingtalk-sync/endpoints?realm={realm}&alias={idpAlias}
 ```
 
-`{realm}` 是当前 realm 名称，例如 `master`；它不是从 Keycloak 管理台当前页面 hash 自动拼接的，而是访问 `/realms/<realm>/...` 时由服务端请求路径确定。`alias` 可以省略，当前 realm 只有一个启用的钉钉 IdP 时页面会自动选中，否则需要在页面里选择或在 URL 中传入。
+后台入口默认使用 `master` 作为固定页面入口；页面里的 `realm` 字段才决定最终生成哪一个 Realm 的接口地址。提交表单时如果填写的 Realm 和当前路径不同，服务端会跳转到对应的 `/realms/<realm>/dingtalk-sync/endpoints` 页面。`alias` 可以省略，当前 Realm 只有一个启用的钉钉 IdP 时页面会自动选中，否则需要在页面里选择或在 URL 中传入。
 
 如果在 URL 中追加本次调试密钥，页面会为浏览器 GET 入口显示“访问”按钮；POST API 入口仍显示“复制地址”按钮：
 
 ```text
-https://your-keycloak-domain/realms/{realm}/dingtalk-sync/endpoints?alias={idpAlias}&key={浏览器同步调试密钥}
+https://your-keycloak-domain/realms/master/dingtalk-sync/endpoints?realm={realm}&alias={idpAlias}&key={浏览器同步调试密钥}
 ```
 
 该页面不会从服务端读取密钥，也不会自动执行同步、清理或发信。密钥只用于本次页面生成浏览器 GET 地址，因此同样可能进入浏览器历史或截图；调试完成后请关闭“启用 GET 同步调试入口”并清空密钥。
@@ -603,7 +603,7 @@ docker restart keycloak
 ERROR: Cannot invoke "Object.equals(Object)" because "currentRealm" is null
 ```
 
-**原因**：Provider 启动阶段没有浏览器请求上下文，不能依赖“当前 realm”，也不应在 `postInit` 中遍历并回写 Identity Provider 配置。接口地址页面必须通过 `/realms/<realm>/dingtalk-sync/endpoints` 运行时请求路径生成实际地址。
+**原因**：Provider 启动阶段没有浏览器请求上下文，不能依赖“当前 realm”，也不应在 `postInit` 中遍历并回写 Identity Provider 配置。后台只显示固定入口 `/realms/master/dingtalk-sync/endpoints`；接口地址页面打开后可切换 Realm，最终仍必须通过 `/realms/<realm>/dingtalk-sync/endpoints` 运行时请求路径生成实际地址。
 
 **解决方案**：确认使用的是不在启动阶段写入 IdP 配置的新 JAR，替换后重新执行 `kc.sh build` 并重启 Keycloak。
 

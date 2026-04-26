@@ -56,14 +56,14 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
     private static final String ENDPOINT_REFERENCE_HELP =
-            "接口地址可通过下方“接口地址页面模板”查看；打开对应 realm 页面后可生成、复制和打开同步、清理、Webhook 测试地址。";
+            "接口地址可通过下方“接口地址页面入口”查看；打开页面后可切换 Realm，并生成、复制和打开同步、清理、Webhook 测试地址。";
     private static final String ENDPOINT_REFERENCE_HELP_TEXT =
-            "固定入口模板，不参与运行配置；将 {realm} 替换为当前 realm，或打开后在页面内选择钉钉 IdP。";
+            "固定入口路径，不参与运行配置；打开后可在页面内切换 Realm 和选择钉钉 IdP。实际接口地址由页面选择的 Realm 生成。";
     private static final List<EndpointReference> ENDPOINT_REFERENCES = List.of(
             new EndpointReference(
                     "dingtalkEndpointReferencePage",
-                    "接口地址页面模板",
-                    "/realms/{realm}/dingtalk-sync/endpoints"));
+                    "接口地址页面入口",
+                    "/realms/master/dingtalk-sync/endpoints"));
 
     @Override
     public String getName() {
