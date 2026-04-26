@@ -56,14 +56,14 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
     private static final String ENDPOINT_REFERENCE_HELP =
-            "接口地址模板仅作为说明展示，不会保存为配置项："
-                    + "管理 API 同步 POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；"
-                    + "浏览器同步执行 GET /realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC；"
-                    + "浏览器同步预览 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；"
-                    + "浏览器清理同步创建用户预览 GET /realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}；"
-                    + "管理 API 清理同步创建用户执行 POST /admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS；"
-                    + "管理 API Webhook 测试 POST /admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}；"
-                    + "浏览器 Webhook 测试 GET /realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}。";
+            "\n\n接口地址模板（只展示，不保存为配置项）：\n"
+                    + "1. 管理同步 POST: /admin/realms/{realm}/dingtalk-sync/run?alias={alias}\n"
+                    + "2. 浏览器同步执行 GET: /realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC\n"
+                    + "3. 浏览器同步预览 GET: /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}\n"
+                    + "4. 浏览器清理预览 GET: /realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}\n"
+                    + "5. 管理清理执行 POST: /admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS\n"
+                    + "6. 管理 Webhook 测试 POST: /admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}\n"
+                    + "7. 浏览器 Webhook 测试 GET: /realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}";
 
     @Override
     public String getName() {
