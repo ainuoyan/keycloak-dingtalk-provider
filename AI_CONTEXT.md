@@ -21,7 +21,7 @@
 | 文件 | 作用 |
 |------|------|
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkIdentityProvider.java` | 钉钉 OAuth 登录、企业用户校验、登录时匹配/创建/更新用户、企业角色授予 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkIdentityProviderFactory.java` | Keycloak Provider 配置项、只读提示 URL、定时同步任务注册 |
+| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkIdentityProviderFactory.java` | Keycloak Provider 配置项、固定 URL 参考字段、定时同步任务注册 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkUserSyncTask.java` | 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run、创建、绑定、更新、重新启用、禁用离职用户 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncAdminResource.java` | 管理端 REST 入口，需要 `manage-users` 权限 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncAdminResourceProvider*.java` | 管理端 REST Provider 和 Factory，注册 `/admin/realms/{realm}/dingtalk-sync/...` |
@@ -182,7 +182,7 @@
 | `POST /cleanup-sync-created-users?alias={alias}&key={debugKey}` | dry-run 清理预览，不删除 |
 | `GET /test-webhook?alias={alias}&key={debugKey}` | 发送钉钉机器人测试消息 |
 
-后台 Identity Provider 配置页不再把接口地址作为可保存配置项暴露。地址模板集中放在“启用 GET 同步调试入口”的说明文本中，避免 Keycloak 管理台把 display-only 字段渲染成可编辑输入框后被误保存。
+后台 Identity Provider 配置页会显示 7 条“接口地址参考”字段，方便管理员查看和复制管理同步、浏览器同步、清理和 Webhook 测试地址。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此本插件用单选固定值展示 URL，避免输入任意错误地址。插件运行时不读取这些参考字段，真实接口地址由 REST Provider 路由决定。
 
 ## 同步结果语义
 

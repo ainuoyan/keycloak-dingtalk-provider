@@ -36,7 +36,7 @@
 keycloak-dingtalk-provider/
 ├── src/main/java/com/tencent/keycloak/dingtalk/
 │   ├── DingTalkIdentityProvider.java                   # 钉钉 OAuth 登录、企业用户校验、登录链路匹配/创建/更新
-│   ├── DingTalkIdentityProviderFactory.java            # Identity Provider 配置项、只读 URL、定时任务注册
+│   ├── DingTalkIdentityProviderFactory.java            # Identity Provider 配置项、固定 URL 参考字段、定时任务注册
 │   ├── DingTalkUserSyncTask.java                       # 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run
 │   ├── DingTalkSyncAdminResource.java                  # 管理端同步、清理、Webhook 测试 REST 入口
 │   ├── DingTalkSyncAdminResourceProvider.java          # 管理端 REST Provider
@@ -167,10 +167,10 @@ services:
 | 启用钉钉机器人通知 | 默认关闭；开启并配置 Webhook 后，登录链路新创建用户、同步真实执行中新创建用户，以及同步真实执行中因 `username` 为空或 `username` 冲突跳过创建的 WARN 会发送到钉钉机器人 |
 | 钉钉机器人 Webhook 地址 | 钉钉自定义机器人 Webhook 地址，通常包含 `access_token`，按敏感字段保存；为空时不发送通知 |
 | 钉钉机器人加签密钥 | 如果钉钉机器人启用了加签安全设置，填写 `SEC...` 密钥；未启用加签时留空 |
-| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址模板会以编号列表显示在该配置项说明里，不作为可保存配置项 |
+| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址会在后台下方的“接口地址参考”字段逐条显示 |
 | 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览和正式同步 |
 
-> 接口地址模板只显示在“启用 GET 同步调试入口”的说明文本里，并按 `1. 管理同步 POST`、`2. 浏览器同步执行 GET` 这类编号前缀区分；不再作为 `manualSyncUrl`、`browserSyncRunUrl` 这类可保存配置项暴露。Keycloak 26 的 Identity Provider 配置页不会可靠禁止这些自定义字段编辑，因此插件改为不提供这些输入框，避免有人把提示地址保存成错误值。
+> 后台会显示 7 条“接口地址参考”字段：管理同步 POST、浏览器同步执行 GET、浏览器同步预览 GET、浏览器清理预览 GET、管理清理执行 POST、管理 Webhook 测试 POST、浏览器 Webhook 测试 GET。Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该组件；因此这些地址用单选固定值展示，不能输入任意 URL。即使 Keycloak 管理台把字段值随表单一起保存，插件运行时也不会读取这些参考字段，真实接口地址始终由 REST Provider 路由决定。
 
 > `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 

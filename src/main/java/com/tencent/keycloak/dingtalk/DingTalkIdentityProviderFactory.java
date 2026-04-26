@@ -56,14 +56,38 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
     private static final String ENDPOINT_REFERENCE_HELP =
-            "\n\n接口地址模板（只展示，不保存为配置项）：\n"
-                    + "1. 管理同步 POST: /admin/realms/{realm}/dingtalk-sync/run?alias={alias}\n"
-                    + "2. 浏览器同步执行 GET: /realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC\n"
-                    + "3. 浏览器同步预览 GET: /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}\n"
-                    + "4. 浏览器清理预览 GET: /realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}\n"
-                    + "5. 管理清理执行 POST: /admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS\n"
-                    + "6. 管理 Webhook 测试 POST: /admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}\n"
-                    + "7. 浏览器 Webhook 测试 GET: /realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}";
+            "接口地址在下方“接口地址参考”字段逐条显示；这些字段只用于后台查看和复制，插件运行时不会读取它们。";
+    private static final String ENDPOINT_REFERENCE_HELP_TEXT =
+            "只读地址参考，不参与运行配置；如果当前 Keycloak 管理台允许打开下拉，也只能选择这个固定地址。";
+    private static final List<EndpointReference> ENDPOINT_REFERENCES = List.of(
+            new EndpointReference(
+                    "dingtalkEndpointReferenceManualSync",
+                    "接口地址参考 1 - 管理同步 POST",
+                    "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}"),
+            new EndpointReference(
+                    "dingtalkEndpointReferenceBrowserSyncRun",
+                    "接口地址参考 2 - 浏览器同步执行 GET",
+                    "/realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC"),
+            new EndpointReference(
+                    "dingtalkEndpointReferenceBrowserSyncPreview",
+                    "接口地址参考 3 - 浏览器同步预览 GET",
+                    "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}"),
+            new EndpointReference(
+                    "dingtalkEndpointReferenceBrowserCleanupPreview",
+                    "接口地址参考 4 - 浏览器清理预览 GET",
+                    "/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}"),
+            new EndpointReference(
+                    "dingtalkEndpointReferenceAdminCleanupExecute",
+                    "接口地址参考 5 - 管理清理执行 POST",
+                    "/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS"),
+            new EndpointReference(
+                    "dingtalkEndpointReferenceAdminWebhookTest",
+                    "接口地址参考 6 - 管理 Webhook 测试 POST",
+                    "/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}"),
+            new EndpointReference(
+                    "dingtalkEndpointReferenceBrowserWebhookTest",
+                    "接口地址参考 7 - 浏览器 Webhook 测试 GET",
+                    "/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}"));
 
     @Override
     public String getName() {
@@ -240,8 +264,26 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .build());
 
+        for (EndpointReference reference : ENDPOINT_REFERENCES) {
+            properties.add(endpointReferenceProperty(reference));
+        }
+
         return properties;
     }
+
+    private ProviderConfigProperty endpointReferenceProperty(EndpointReference reference) {
+        ProviderConfigProperty property = new ProviderConfigProperty(
+                reference.name(),
+                reference.label(),
+                ENDPOINT_REFERENCE_HELP_TEXT,
+                ProviderConfigProperty.LIST_TYPE,
+                reference.url(),
+                reference.url());
+        property.setReadOnly(true);
+        return property;
+    }
+
+    private record EndpointReference(String name, String label, String url) {}
 
     static boolean isSyncGetDebugEnabled(IdentityProviderModel idp) {
         return idp != null && isSyncGetDebugEnabled(idp.getConfig());
