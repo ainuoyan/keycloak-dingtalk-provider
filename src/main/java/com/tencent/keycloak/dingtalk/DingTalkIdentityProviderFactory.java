@@ -188,7 +188,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(BROWSER_SYNC_DEBUG_KEY)
                 .label("浏览器同步调试密钥")
-                .helpText("填写后启用纯浏览器 GET 预览入口。该入口只拉取钉钉并返回 dry-run 统计，不写入 Keycloak；真实同步请使用管理端 POST")
+                .helpText("填写后启用纯浏览器 GET 预览入口。该入口只拉取钉钉并返回 dry-run 统计，不写入 Keycloak；真实同步请使用管理端 GET/POST")
                 .type(ProviderConfigProperty.PASSWORD)
                 .secret(true)
                 .add()
@@ -197,7 +197,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
         ProviderConfigProperty manualSyncUrl = new ProviderConfigProperty(
                 MANUAL_SYNC_URL,
                 "管理端同步调试地址",
-                "管理 API 调试只支持 POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；需要 Admin Bearer Token 且具备 manage-users 权限。",
+                "管理 API 调试支持 GET/POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；会真实同步，需要管理员认证且具备 manage-users 权限。",
                 ProviderConfigProperty.STRING_TYPE,
                 "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}");
         manualSyncUrl.setReadOnly(true);

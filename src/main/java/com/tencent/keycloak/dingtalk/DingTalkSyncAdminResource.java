@@ -1,6 +1,7 @@
 package com.tencent.keycloak.dingtalk;
 
 import java.util.Map;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.QueryParam;
@@ -29,6 +30,12 @@ public class DingTalkSyncAdminResource {
     @POST
     @Path("run")
     public Response run(@QueryParam("alias") String alias) throws Exception {
+        return runSync(alias);
+    }
+
+    @GET
+    @Path("run")
+    public Response runFromBrowser(@QueryParam("alias") String alias) throws Exception {
         return runSync(alias);
     }
 

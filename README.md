@@ -143,7 +143,7 @@ services:
 | 定期同步重新启用返聘用户 | 默认开启，离职用户重新出现在钉钉通讯录时自动启用 |
 | 记录同步明细日志 | 默认关闭；开启后定时同步会记录每个钉钉用户的匹配来源、Keycloak 用户名、更新字段和跳过原因。手动同步会自动记录明细 |
 | 浏览器同步调试密钥 | 默认空，填写后启用纯浏览器 GET 预览入口。该入口只返回 dry-run 统计，不写入 Keycloak |
-| 管理端同步调试地址 | 只读提示项，显示管理 API 调试路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}`，真实同步只支持 POST 且需要管理权限 |
+| 管理端同步调试地址 | 只读提示项，显示管理 API 调试路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}`，GET/POST 都会真实同步且需要管理权限 |
 | 浏览器同步预览地址 | 只读提示项，显示 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}` |
 
 > `登录后是否更新用户信息` 只控制 Provider 是否写回用户属性。它不会关闭 Keycloak 首次第三方登录流程里的 **Review Profile / Update Profile** 页面；如果 AD 用户已经同步完成，只希望钉钉按用户名或邮箱绑定已有用户，请复制 `first broker login` flow，禁用或删除其中的 `Review Profile` 执行项，然后在钉钉 Identity Provider 的 **First Login Flow** 里选择这个副本。
@@ -191,7 +191,7 @@ AD 已同步用户的推荐配置：
 
 ### 手动触发钉钉同步
 
-插件提供了一个管理端手动同步入口，方便测试和排障。真实同步只支持 POST：
+插件提供了一个管理端手动同步入口，方便测试和排障。GET 和 POST 都会执行真实同步，并且都会先校验当前调用者是否具备当前 realm 的 `manage-users` 权限。
 
 ```bash
 curl -X POST \
@@ -199,7 +199,13 @@ curl -X POST \
   "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}"
 ```
 
-要求调用者具备当前 realm 的 `manage-users` 权限。`alias` 是钉钉 Identity Provider 的别名；如果不传 `alias`，会同步当前 realm 下所有启用的钉钉 Identity Provider。
+浏览器里也可以直接访问同一路径触发真实同步，前提是请求能通过 Keycloak 管理端认证并拥有 `manage-users` 权限：
+
+```text
+https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}
+```
+
+`alias` 是钉钉 Identity Provider 的别名；如果不传 `alias`，会同步当前 realm 下所有启用的钉钉 Identity Provider。
 
 如果需要不带 Admin Bearer Token、直接在浏览器地址栏查看钉钉通讯录同步预览，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
 
