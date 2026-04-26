@@ -252,8 +252,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 reference.name(),
                 reference.label(),
                 ENDPOINT_REFERENCE_HELP_TEXT,
-                ProviderConfigProperty.LIST_TYPE,
-                reference.url(),
+                ProviderConfigProperty.STRING_TYPE,
                 reference.url());
         property.setReadOnly(true);
         return property;
