@@ -1,6 +1,7 @@
 package com.tencent.keycloak.dingtalk;
 
 import java.util.List;
+import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 import org.jboss.logging.Logger;
 import org.keycloak.models.FederatedIdentityModel;
@@ -12,6 +13,7 @@ import org.keycloak.models.UserModel;
 final class DingTalkNumericUserCleanup {
 
     static final String CONFIRM = "DELETE_NUMERIC_DINGTALK_USERS";
+    private static final Pattern NUMERIC_USERNAME = Pattern.compile("\\d+");
 
     private static final Logger logger = Logger.getLogger(DingTalkNumericUserCleanup.class);
 
@@ -46,7 +48,7 @@ final class DingTalkNumericUserCleanup {
     private static List<UserModel> findCandidates(KeycloakSession session, RealmModel realm, IdentityProviderModel idp) {
         return session.users()
                 .searchForUserByUserAttributeStream(realm, "dingtalk_idp_alias", idp.getAlias())
-                .filter(user -> user.getUsername() != null && user.getUsername().matches("\\d+"))
+                .filter(user -> user.getUsername() != null && NUMERIC_USERNAME.matcher(user.getUsername()).matches())
                 .filter(user -> "true".equals(user.getFirstAttribute("dingtalk_managed")))
                 .filter(DingTalkNumericUserCleanup::isSyncCreatedOrLegacyNumericUser)
                 .filter(user -> hasFederatedIdentity(session, realm, user, idp.getAlias()))

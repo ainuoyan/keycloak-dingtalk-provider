@@ -114,6 +114,14 @@ class DingTalkIdentityProviderTest {
     }
 
     @Test
+    void sanitizeUriForLogKeepsHostAndPathButDropsQuery() {
+        assertEquals("https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?***",
+                DingTalkIdentityProvider.sanitizeUriForLog(
+                        "https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?code=abc&state=xyz"));
+        assertEquals("***", DingTalkIdentityProvider.sanitizeUriForLog("not a valid uri"));
+    }
+
+    @Test
     void formatMobileRemovesChinaCountryCodeOnly() {
         assertEquals("13800000000", DingTalkIdentityProvider.formatMobile("+8613800000000"));
         assertEquals("8613800000000", DingTalkIdentityProvider.formatMobile("8613800000000"));

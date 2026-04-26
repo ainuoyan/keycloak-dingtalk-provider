@@ -180,6 +180,24 @@ AD 已同步用户的推荐配置：
 
 默认只同步 `phoneNumber` 且不覆盖已有值，适合 AD 没有手机号、Keycloak 只需要从钉钉补齐手机号的场景。
 
+### 日志脱敏说明（重点）
+
+为避免排障日志泄露 OAuth 敏感参数，插件在输出登录跳转日志时会对 `redirect_uri` 做脱敏处理：
+- 保留：协议、域名、端口、路径（便于定位是哪个 realm / broker 回调路径）
+- 隐藏：查询参数（例如 `code`、`state`），统一显示为 `?***`
+
+示例：
+
+```text
+原始 redirect_uri:
+https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?code=abc&state=xyz
+
+日志输出:
+https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?***
+```
+
+建议线上环境仅在排障窗口短期开启 DEBUG，并结合日志平台字段脱敏策略一起使用。
+
 如果要把钉钉作为 Keycloak 第一阶段用户主源，推荐：
 
 - `仅允许本企业钉钉用户登录`：开启

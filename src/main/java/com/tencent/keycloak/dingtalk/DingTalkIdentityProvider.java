@@ -157,7 +157,7 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
 
             URI loginUri = authUrl.build();
             logger.debugf("Redirecting to DingTalk OAuth endpoint, redirectUri=%s, scope=%s",
-                    redirectUri, getDefaultScopes());
+                    sanitizeUriForLog(redirectUri), getDefaultScopes());
 
             return Response.seeOther(loginUri).build();
         } catch (Exception e) {
@@ -1012,6 +1012,34 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
                     "$1***");
         }
         return sanitized;
+    }
+
+    static String sanitizeUriForLog(String uriValue) {
+        if (StringUtils.isBlank(uriValue)) {
+            return uriValue;
+        }
+        try {
+            URI parsed = URI.create(uriValue.trim());
+            StringBuilder builder = new StringBuilder();
+            if (StringUtils.isNotBlank(parsed.getScheme())) {
+                builder.append(parsed.getScheme()).append("://");
+            }
+            if (StringUtils.isNotBlank(parsed.getHost())) {
+                builder.append(parsed.getHost());
+            }
+            if (parsed.getPort() > 0) {
+                builder.append(":").append(parsed.getPort());
+            }
+            if (StringUtils.isNotBlank(parsed.getPath())) {
+                builder.append(parsed.getPath());
+            }
+            if (StringUtils.isNotBlank(parsed.getQuery())) {
+                builder.append("?***");
+            }
+            return builder.isEmpty() ? "***" : builder.toString();
+        } catch (Exception ignored) {
+            return "***";
+        }
     }
 
     static String mask(String value) {
