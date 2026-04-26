@@ -52,7 +52,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String MATCH_RULES = "matchRules";
     private static final String MANUAL_SYNC_URL = "manualSyncUrl";
     static final String BROWSER_SYNC_DEBUG_KEY = "browserSyncDebugKey";
-    private static final String BROWSER_SYNC_DEBUG_URL = "browserSyncDebugUrl";
+    private static final String ADMIN_SYNC_PREVIEW_URL = "adminSyncPreviewUrl";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
 
@@ -216,14 +216,14 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
         manualSyncUrl.setReadOnly(true);
         properties.add(manualSyncUrl);
 
-        ProviderConfigProperty browserSyncDebugUrl = new ProviderConfigProperty(
-                BROWSER_SYNC_DEBUG_URL,
+        ProviderConfigProperty adminSyncPreviewUrl = new ProviderConfigProperty(
+                ADMIN_SYNC_PREVIEW_URL,
                 "浏览器同步预览地址",
                 "管理端浏览器预览可访问 GET /admin/realms/{realm}/dingtalk-sync/debug?alias={alias}；需要管理员认证和 manage-users 权限，返回 dry-run 统计，不创建、更新、禁用用户。",
                 ProviderConfigProperty.STRING_TYPE,
                 "/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}");
-        browserSyncDebugUrl.setReadOnly(true);
-        properties.add(browserSyncDebugUrl);
+        adminSyncPreviewUrl.setReadOnly(true);
+        properties.add(adminSyncPreviewUrl);
 
         return properties;
     }

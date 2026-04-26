@@ -148,6 +148,8 @@ services:
 | 管理端同步调试地址 | 只读提示项，显示管理 API 调试路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC`；GET/POST 都会真实同步且需要管理权限，GET 额外要求确认参数 |
 | 浏览器同步预览地址 | 只读提示项，显示管理端 GET 预览路径 `/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}`；需要管理员认证和 `manage-users` 权限 |
 
+> 如果旧版本已保存过只读提示项 `browserSyncDebugUrl`，Keycloak 管理台可能继续显示旧的 `/realms/{realm}/dingtalk-sync/debug?...`。新版本改用 `adminSyncPreviewUrl` 作为只读提示项，避免读取旧配置值；重新构建并重启后应显示 `/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}`。
+
 > `登录后是否更新用户信息` 只控制 Provider 是否写回用户属性。它不会关闭 Keycloak 首次第三方登录流程里的 **Review Profile / Update Profile** 页面；如果 AD 用户已经同步完成，只希望钉钉按用户名或邮箱绑定已有用户，请复制 `first broker login` flow，禁用或删除其中的 `Review Profile` 执行项，然后在钉钉 Identity Provider 的 **First Login Flow** 里选择这个副本。
 
 AD 已同步用户的推荐配置：
