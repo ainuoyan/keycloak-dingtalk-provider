@@ -170,7 +170,7 @@ services:
 | 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址可通过后台下方的“接口地址页面入口”查看 |
 | 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览、正式同步和 Webhook 测试 |
 
-> 后台会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。插件会在有当前 Realm 请求上下文时把这个固定相对路径补写到当前钉钉 IdP 配置中，并用 Keycloak Admin UI 的 URL 字段渲染为可点击入口；浏览器会按当前站点域名解析该相对路径。打开页面后可以在页面内填写/切换 Realm、选择钉钉 IdP、临时填写本次浏览器同步调试密钥。页面会把地址分为两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由页面选择的 Realm 对应 REST Provider 路由决定。
+> 后台会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这个路径直接内置在插件 JAR 的 `URL_TYPE` 配置项默认值里，不写入钉钉 IdP config；浏览器会按当前站点域名解析该相对路径。打开页面后可以在页面内填写/切换 Realm、选择钉钉 IdP、临时填写本次浏览器同步调试密钥。页面会把地址分为两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由页面选择的 Realm 对应 REST Provider 路由决定。
 
 > Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该复制组件。插件因此在配置页用 `URL_TYPE` 放一个固定相对路径入口，访问按钮和复制按钮放在插件自己的接口地址页面里。该入口路径只用于后台展示，插件执行同步时不会读取它。
 
@@ -603,7 +603,7 @@ docker restart keycloak
 ERROR: Cannot invoke "Object.equals(Object)" because "currentRealm" is null
 ```
 
-**原因**：Provider 启动阶段没有浏览器请求上下文，不能依赖“当前 realm”，也不能在 `postInit` 中遍历 Realm 并改写 IdP 配置。后台入口只保存固定相对路径 `/realms/master/dingtalk-sync/endpoints`；接口地址页面打开后可切换 Realm，最终仍必须通过 `/realms/<realm>/dingtalk-sync/endpoints` 运行时请求路径生成实际地址。
+**原因**：Provider 启动阶段没有浏览器请求上下文，不能依赖“当前 realm”，也不能在 `postInit` 中遍历 Realm 并改写 IdP 配置。后台入口固定相对路径 `/realms/master/dingtalk-sync/endpoints` 直接内置在 JAR 的只读 URL 配置项默认值里，不需要保存到 IdP config；接口地址页面打开后可切换 Realm，最终仍必须通过 `/realms/<realm>/dingtalk-sync/endpoints` 运行时请求路径生成实际地址。
 
 **解决方案**：确认使用的是不在启动阶段依赖当前请求 Realm 的新 JAR，替换后重新执行 `kc.sh build` 并重启 Keycloak。
 

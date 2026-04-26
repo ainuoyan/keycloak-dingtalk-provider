@@ -58,7 +58,6 @@ public class DingTalkSyncBrowserResource {
         IdentityProviderModel selectedIdp = StringUtils.isNotBlank(selectedAlias)
                 ? getDingTalkProvider(realm, selectedAlias)
                 : null;
-        persistEndpointReferenceConfig(realm, selectedIdp);
 
         String html = renderEndpointsPage(realm, aliases, selectedAlias, key, selectedIdp, uriInfo);
         return Response.ok(html)
@@ -252,12 +251,6 @@ public class DingTalkSyncBrowserResource {
                 .map(IdentityProviderModel::getAlias)
                 .sorted(Comparator.naturalOrder())
                 .toList();
-    }
-
-    private void persistEndpointReferenceConfig(RealmModel realm, IdentityProviderModel idp) {
-        if (realm != null && DingTalkIdentityProviderFactory.ensureEndpointReferenceConfig(idp)) {
-            realm.updateIdentityProvider(idp);
-        }
     }
 
     private IdentityProviderModel getAuthorizedDingTalkProvider(RealmModel realm, String alias, String key) {

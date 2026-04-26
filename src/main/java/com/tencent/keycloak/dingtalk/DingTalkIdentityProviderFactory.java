@@ -18,7 +18,6 @@
 package com.tencent.keycloak.dingtalk;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.keycloak.broker.oidc.OAuth2IdentityProviderConfig;
@@ -27,7 +26,6 @@ import org.keycloak.broker.social.SocialIdentityProviderFactory;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
@@ -76,16 +74,12 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     @Override
     public DingTalkIdentityProvider create(KeycloakSession session, IdentityProviderModel model) {
-        boolean updated = ensureEndpointReferenceConfig(model);
-        persistEndpointReferenceConfigIfRealmAvailable(session, model, updated);
         return new DingTalkIdentityProvider(session, new OAuth2IdentityProviderConfig(model));
     }
 
     @Override
     public IdentityProviderModel createConfig() {
-        OAuth2IdentityProviderConfig config = new OAuth2IdentityProviderConfig();
-        ensureEndpointReferenceConfig(config);
-        return config;
+        return new OAuth2IdentityProviderConfig();
     }
 
     @Override
@@ -267,33 +261,6 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     }
 
     private record EndpointReference(String name, String label, String url) {}
-
-    static boolean ensureEndpointReferenceConfig(IdentityProviderModel idp) {
-        if (idp == null) {
-            return false;
-        }
-        Map<String, String> config = idp.getConfig();
-        if (ENDPOINT_REFERENCE_PAGE_URL.equals(config == null ? null : config.get(ENDPOINT_REFERENCE_PAGE_CONFIG))) {
-            return false;
-        }
-        Map<String, String> updatedConfig = config == null ? new HashMap<>() : new HashMap<>(config);
-        updatedConfig.put(ENDPOINT_REFERENCE_PAGE_CONFIG, ENDPOINT_REFERENCE_PAGE_URL);
-        idp.setConfig(updatedConfig);
-        return true;
-    }
-
-    private void persistEndpointReferenceConfigIfRealmAvailable(KeycloakSession session,
-                                                                IdentityProviderModel idp,
-                                                                boolean updated) {
-        if (!updated || session == null || idp == null || idp.getAlias() == null) {
-            return;
-        }
-        RealmModel currentRealm = session.getContext() == null ? null : session.getContext().getRealm();
-        if (currentRealm == null || currentRealm.getIdentityProviderByAlias(idp.getAlias()) == null) {
-            return;
-        }
-        currentRealm.updateIdentityProvider(idp);
-    }
 
     static boolean isSyncGetDebugEnabled(IdentityProviderModel idp) {
         return idp != null && isSyncGetDebugEnabled(idp.getConfig());

@@ -289,11 +289,10 @@ class DingTalkIdentityProviderTest {
         IdentityProviderModel idp = new IdentityProviderModel();
         idp.setConfig(Map.of("existing", "value"));
 
-        assertTrue(DingTalkIdentityProviderFactory.ensureEndpointReferenceConfig(idp));
-        assertEquals(DingTalkIdentityProviderFactory.ENDPOINT_REFERENCE_PAGE_URL,
-                idp.getConfig().get(DingTalkIdentityProviderFactory.ENDPOINT_REFERENCE_PAGE_CONFIG));
+        IdentityProviderModel config = new DingTalkIdentityProviderFactory().createConfig();
+        assertTrue(config.getConfig() == null
+                || !config.getConfig().containsKey(DingTalkIdentityProviderFactory.ENDPOINT_REFERENCE_PAGE_CONFIG));
         assertEquals("value", idp.getConfig().get("existing"));
-        assertFalse(DingTalkIdentityProviderFactory.ensureEndpointReferenceConfig(idp));
     }
 
     @Test
