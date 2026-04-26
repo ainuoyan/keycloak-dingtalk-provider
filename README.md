@@ -149,6 +149,8 @@ services:
 | 管理 API 同步地址 | 只读提示项，显示管理 API POST 同步路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}`；GET 真实同步仅在开启 GET 同步调试入口后可用，并额外要求 `confirm=RUN_DINGTALK_SYNC` |
 | 浏览器同步执行地址 | 只读提示项，显示纯浏览器 GET 正式同步路径 `/realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC`；会真实同步，需要开启 GET 同步调试入口并填写正确调试密钥 |
 | 浏览器同步预览地址 | 只读提示项，显示纯浏览器 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}`；需要开启 GET 同步调试入口并填写正确调试密钥 |
+| 浏览器清理同步创建用户预览地址 | 只读提示项，显示纯浏览器 GET 清理预览路径 `/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}`；只返回 dry-run 名单，不删除用户 |
+| 管理 API 清理同步创建用户执行地址 | 只读提示项，显示管理 API POST 清理路径 `/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS`；会删除当前钉钉 IdP 同步创建的用户，需要管理端 token 和 `manage-users` 权限 |
 
 > `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 

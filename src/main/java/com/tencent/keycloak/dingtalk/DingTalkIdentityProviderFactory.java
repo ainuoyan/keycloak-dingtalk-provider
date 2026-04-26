@@ -56,6 +56,8 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     static final String BROWSER_SYNC_DEBUG_KEY = "browserSyncDebugKey";
     private static final String BROWSER_SYNC_RUN_URL = "browserSyncRunUrl";
     private static final String BROWSER_SYNC_PREVIEW_URL = "browserSyncPreviewUrl";
+    private static final String BROWSER_SYNC_CLEANUP_PREVIEW_URL = "browserSyncCleanupPreviewUrl";
+    private static final String ADMIN_SYNC_CLEANUP_EXECUTE_URL = "adminSyncCleanupExecuteUrl";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
 
@@ -216,34 +218,53 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .build());
 
-        ProviderConfigProperty manualSyncUrl = new ProviderConfigProperty(
+        ProviderConfigProperty manualSyncUrl = readOnlyUrlProperty(
                 MANUAL_SYNC_URL,
                 "管理 API 同步地址",
                 "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；GET 真实同步仅在开启 GET 同步调试入口后可用，并额外要求 confirm=RUN_DINGTALK_SYNC。两者都需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
-                ProviderConfigProperty.STRING_TYPE,
                 "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}");
-        manualSyncUrl.setReadOnly(true);
         properties.add(manualSyncUrl);
 
-        ProviderConfigProperty browserSyncRunUrl = new ProviderConfigProperty(
+        ProviderConfigProperty browserSyncRunUrl = readOnlyUrlProperty(
                 BROWSER_SYNC_RUN_URL,
                 "浏览器同步执行地址",
                 "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC；会真实同步并写入 Keycloak。",
-                ProviderConfigProperty.STRING_TYPE,
                 "/realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC");
-        browserSyncRunUrl.setReadOnly(true);
         properties.add(browserSyncRunUrl);
 
-        ProviderConfigProperty browserSyncPreviewUrl = new ProviderConfigProperty(
+        ProviderConfigProperty browserSyncPreviewUrl = readOnlyUrlProperty(
                 BROWSER_SYNC_PREVIEW_URL,
                 "浏览器同步预览地址",
                 "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；返回 dry-run 统计，不创建、更新、禁用用户。",
-                ProviderConfigProperty.STRING_TYPE,
                 "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}");
-        browserSyncPreviewUrl.setReadOnly(true);
         properties.add(browserSyncPreviewUrl);
 
+        ProviderConfigProperty browserSyncCleanupPreviewUrl = readOnlyUrlProperty(
+                BROWSER_SYNC_CLEANUP_PREVIEW_URL,
+                "浏览器清理同步创建用户预览地址",
+                "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}；只返回 dry-run 名单，不删除用户。",
+                "/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}");
+        properties.add(browserSyncCleanupPreviewUrl);
+
+        ProviderConfigProperty adminSyncCleanupExecuteUrl = readOnlyUrlProperty(
+                ADMIN_SYNC_CLEANUP_EXECUTE_URL,
+                "管理 API 清理同步创建用户执行地址",
+                "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS；会删除当前钉钉 IdP 同步创建的用户，需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
+                "/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS");
+        properties.add(adminSyncCleanupExecuteUrl);
+
         return properties;
+    }
+
+    private ProviderConfigProperty readOnlyUrlProperty(String name, String label, String helpText, String value) {
+        ProviderConfigProperty property = new ProviderConfigProperty(
+                name,
+                label,
+                helpText,
+                ProviderConfigProperty.STRING_TYPE,
+                value);
+        property.setReadOnly(true);
+        return property;
     }
 
     static boolean isSyncGetDebugEnabled(IdentityProviderModel idp) {
