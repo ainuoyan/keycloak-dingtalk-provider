@@ -14,7 +14,7 @@
 - 独立 JAR 包部署，支持热插拔
 - 自动同步用户信息（昵称、手机号、邮箱）
 - 支持企业内部应用 OAuth2.0 登录
-- 按企业 ID 精确授予 `ent-member:{企业ID}` 和 `ent-plugin-enabled:{企业ID}` 角色
+- 可选按企业 ID 授予 `ent-member:{企业ID}` 和 `ent-plugin-enabled:{企业ID}` 角色
 - 兼容 Keycloak 26.6.1+
 
 ## 技术栈
@@ -42,6 +42,7 @@ keycloak-dingtalk-provider/
 │   └── DingTalkLoginEventListenerProviderTest.java
 ├── src/main/resources/META-INF/services/
 │   └── org.keycloak.broker.social.SocialIdentityProviderFactory  # SPI 注册
+├── dist/keycloak-dingtalk-provider.jar        # 已编译 JAR，可直接部署
 ├── pom.xml                                    # Maven 配置
 └── README.md                                  # 本文档
 ```
@@ -57,14 +58,22 @@ keycloak-dingtalk-provider/
 - Maven 3.6+
 - 钉钉开放平台账号
 
-### Step 1: 编译打包
+### Step 1: 获取 JAR
+
+仓库已提交一份可直接部署的 JAR：
+
+```text
+dist/keycloak-dingtalk-provider.jar
+```
+
+也可以自行编译：
 
 ```bash
 cd keycloak-dingtalk-provider
 mvn clean package -DskipTests
 ```
 
-编译成功后，JAR 文件位于：`target/keycloak-dingtalk-provider.jar`（约 2.0MB，包含钉钉集成所需的第三方依赖；Keycloak 运行时依赖不打入包内）
+自行编译后，JAR 文件位于：`target/keycloak-dingtalk-provider.jar`。JAR 包包含钉钉集成所需的第三方依赖；Keycloak 运行时依赖不打入包内。
 
 ### Step 2: 部署到 Keycloak
 
@@ -72,7 +81,7 @@ mvn clean package -DskipTests
 
 ```bash
 # 复制 JAR 到容器
-docker cp target/keycloak-dingtalk-provider.jar keycloak:/opt/keycloak/providers/
+docker cp dist/keycloak-dingtalk-provider.jar keycloak:/opt/keycloak/providers/
 
 # 重启容器
 docker restart keycloak
@@ -82,7 +91,7 @@ docker restart keycloak
 
 ```bash
 # 复制 JAR 到 providers 目录
-cp target/keycloak-dingtalk-provider.jar /path/to/keycloak/providers/
+cp dist/keycloak-dingtalk-provider.jar /path/to/keycloak/providers/
 
 # 重新构建并重启
 /path/to/keycloak/bin/kc.sh build
@@ -97,7 +106,7 @@ services:
   keycloak:
     image: keycloak/keycloak:26.6.1
     volumes:
-      - ./target/keycloak-dingtalk-provider.jar:/opt/keycloak/providers/keycloak-dingtalk-provider.jar:ro
+      - ./dist/keycloak-dingtalk-provider.jar:/opt/keycloak/providers/keycloak-dingtalk-provider.jar:ro
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
@@ -123,7 +132,7 @@ services:
 | 启用企业角色授予 | 默认关闭；开启后登录成功时尝试授予 `ent-member:{企业ID}` 和 `ent-plugin-enabled:{企业ID}` |
 | 匹配失败是否允许登录 | 默认开启，匹配失败时创建新用户 |
 | 匹配规则配置 | 默认 `phone,email`，支持 `phone`、`email`、`unionId`、`openId`、`username`；按配置顺序匹配 |
-| 启用定期同步钉钉通讯录 | 默认关闭，开启后 Keycloak 定期读取钉钉通讯录，按 userId、邮箱、手机号匹配已有用户并绑定钉钉身份 |
+| 启用定期同步钉钉通讯录 | 默认关闭，开启后 Keycloak 定期读取钉钉通讯录，按已绑定身份、手机号、邮箱等规则匹配已有用户并绑定钉钉身份 |
 | 定期同步周期秒数 | 默认 `3600`，每个钉钉 Identity Provider 的最小同步间隔 |
 | 定期同步部门ID | 默认 `1`，多个根部门 ID 用逗号分隔 |
 | 同步子部门用户 | 默认开启，会递归展开“定期同步部门ID”下的所有子部门，再同步每个部门的用户 |
@@ -161,7 +170,7 @@ AD 已同步用户的推荐配置：
 3. 先查是否已经绑定当前钉钉 Identity Provider。
 4. 未绑定时，按“匹配规则配置”的顺序匹配已有 Keycloak 用户，例如 `phone,email` 会先查手机号，再查邮箱。
 5. 匹配成功后补充钉钉 federated identity 绑定，并标记为当前钉钉 IDP 托管用户。
-6. 匹配失败且开启“定期同步自动创建用户”时，自动创建 Keycloak 用户，并绑定钉钉身份。
+6. 匹配失败且开启“定期同步自动创建用户”时，按姓名拼音规则创建 Keycloak 用户，并绑定钉钉身份。
 7. 按“定期同步字段”和“定期同步覆盖已有字段”更新 `phoneNumber`、`email`；同时始终记录 `nickname`、`dingtalk_userid`、`dingtalk_last_sync_at` 等钉钉身份和排障属性。
 8. 开启“定期同步禁用离职用户”时，仅禁用此前由当前钉钉同步任务标记为托管、但本次完整通讯录中不存在的用户。
 
@@ -221,7 +230,7 @@ curl -X POST \
   "https://your-keycloak-domain/realms/{realm}/dingtalk-sync/cleanup-numeric-users?alias={idpAlias}&key={浏览器同步调试密钥}&confirm=DELETE_NUMERIC_DINGTALK_USERS"
 ```
 
-删除后再次访问浏览器同步调试地址，会按姓名拼音规则重新创建或绑定用户。
+删除后再次访问浏览器同步调试地址，会按姓名拼音规则重新创建用户，或按手机号、邮箱等规则绑定已有用户。
 
 接口返回本次同步统计，例如：
 
@@ -313,7 +322,7 @@ curl -X POST \
 | 钉钉字段 | Keycloak 属性 | 处理逻辑 |
 |---------|--------------|---------|
 | `unionId` | 用户唯一ID | 优先使用，跨应用唯一 |
-| `userId` | `dingtalk_userid` / 用户名候选 | 企业通讯录 userId，优先用于 `username` 匹配 |
+| `userId` | `dingtalk_userid` | 企业通讯录 userId，始终写入用户属性；仅在配置 `username` 匹配规则时作为兼容候选之一，不用于新用户 username 生成 |
 | `openId` | `dingtalk_openid` | 应用内唯一标识 |
 | `corpId` | `dingtalk_corpid` | 用于定位企业角色后缀 |
 | `nick` | `nickname` | 用户昵称 |
@@ -322,10 +331,16 @@ curl -X POST \
 
 ### 用户名生成规则
 
-- 优先使用企业通讯录 `userId`
-- 其次使用邮箱前缀，例如 `zhangsan@rzon.tech` → `zhangsan`
-- 最后使用 `dt_` + 昵称，特殊字符会被替换为下划线
-- 若无昵称：`dingtalk_user_` + 时间戳
+创建新 Keycloak 用户时，登录链路和定时同步链路使用同一套 username 规则：
+
+1. 先把钉钉姓名转换为拼音，例如 `张三` → `zhangsan`。
+2. 如果钉钉邮箱存在，且邮箱前缀与姓名拼音一致，例如 `zhangsan@rzon.tech`，则使用邮箱前缀 `zhangsan`。
+3. 其他情况下优先使用姓名拼音作为 username。
+4. 如果姓名无法转换出拼音，再依次回退到邮箱前缀、钉钉 `userId`、`unionId`。
+
+`dingtalk_userid` 会始终写入用户属性，方便排障和后续同步定位。它不再作为新用户 username 的优先来源。
+
+如果生成出的 username 已存在，但该钉钉用户没有通过已绑定身份、手机号或邮箱等可信规则匹配到这个用户，定时同步会跳过创建并输出 WARN，避免同名拼音导致绑错账号。
 
 ---
 
@@ -338,14 +353,14 @@ curl -X POST \
 docker exec keycloak ls -lh /opt/keycloak/providers/keycloak-dingtalk-provider.jar
 
 # 检查 JAR 内容
-jar tf target/keycloak-dingtalk-provider.jar | grep -E "(DingTalk|fastjson|commons-lang)"
+jar tf dist/keycloak-dingtalk-provider.jar | grep -E "(DingTalk|fastjson|pinyin4j)"
 ```
 
 预期输出应包含：
 - `com/tencent/keycloak/dingtalk/DingTalkIdentityProvider.class`
 - `com/tencent/keycloak/dingtalk/DingTalkIdentityProviderFactory.class`
 - `com/alibaba/fastjson2/...`
-- `org/apache/commons/lang3/...`
+- `net/sourceforge/pinyin4j/...`
 
 ### 检查日志
 
@@ -396,13 +411,13 @@ docker logs keycloak 2>&1 | grep -E "(dingtalk|SPI|provider)"
 **解决方案**：
 ```bash
 # 确认 JAR 包含所有依赖
-jar tf target/keycloak-dingtalk-provider.jar | grep -E "(fastjson|commons-lang)"
+jar tf dist/keycloak-dingtalk-provider.jar | grep -E "(fastjson|pinyin4j)"
 
 # 如果缺失，重新打包
 mvn clean package -DskipTests
 
 # 确认 JAR 大小 > 2MB（包含依赖）
-ls -lh target/keycloak-dingtalk-provider.jar
+ls -lh dist/keycloak-dingtalk-provider.jar
 ```
 
 ### 问题 3: OAuth 错误 "invalid_client"
@@ -512,6 +527,9 @@ mvn clean package -DskipTests
 # 2. 替换 JAR
 docker cp target/keycloak-dingtalk-provider.jar keycloak:/opt/keycloak/providers/
 
+# 如果直接使用仓库内已编译版本：
+# docker cp dist/keycloak-dingtalk-provider.jar keycloak:/opt/keycloak/providers/
+
 # 3. 重启
 docker restart keycloak
 ```
@@ -556,7 +574,7 @@ docker restart keycloak
 
 ### 性能特性
 
-- **JAR 大小**：约 2.5MB（包含所有依赖）
+- **JAR 大小**：约 2.3MB（包含 fastjson2、pinyin4j 等插件运行所需依赖；Keycloak 运行时依赖由 Keycloak 提供）
 - **编译时间**：约 30 秒
 - **部署时间**：< 5 秒
 - **Provider 加载**：< 1 秒

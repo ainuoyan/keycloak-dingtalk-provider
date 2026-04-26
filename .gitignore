@@ -1,5 +1,7 @@
 target/
 *.jar
+!dist/
+!dist/keycloak-dingtalk-provider.jar
 *.class
 *.log
 .idea/
