@@ -45,6 +45,8 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String IS_UPDATE_USER_INFO = "isUpdateUserInfo";
     private static final String SYNC_PHONE_NUMBER_IF_MISSING = "syncPhoneNumberIfMissing";
     private static final String ENTERPRISE_ID = "enterpriseId";
+    private static final String REQUIRE_ENTERPRISE_USER = "requireEnterpriseUser";
+    private static final String ALLOWED_CORP_IDS = "allowedCorpIds";
     private static final String ENABLE_ENTERPRISE_ROLE_GRANT = DingTalkIdentityProvider.ENABLE_ENTERPRISE_ROLE_GRANT;
     private static final String MATCH_ACTION = "matchAction";
     private static final String MATCH_RULES = "matchRules";
@@ -107,6 +109,17 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .label("企业ID/角色后缀")
                 .helpText("开启“启用企业角色授予”时作为 ent-member:{企业ID} 和 ent-plugin-enabled:{企业ID} 的角色后缀；为空时使用钉钉返回的 corpId")
                 .type(ProviderConfigProperty.STRING_TYPE)
+                .add()
+                .property().name(REQUIRE_ENTERPRISE_USER)
+                .label("仅允许本企业钉钉用户登录")
+                .helpText("默认开启。开启后，登录回调必须带钉钉企业 corpId，且必须在“允许登录的企业 CorpId”列表内，否则拒绝登录且不会自动创建用户")
+                .type(ProviderConfigProperty.BOOLEAN_TYPE)
+                .defaultValue(true)
+                .add()
+                .property().name(ALLOWED_CORP_IDS)
+                .label("允许登录的企业 CorpId")
+                .helpText("逗号分隔，例如 dingxxxxxxxx。开启“仅允许本企业钉钉用户登录”时必须填写，只有列表中的企业用户可以登录和自动创建")
+                .type(ProviderConfigProperty.TEXT_TYPE)
                 .add()
                 .property().name(ENABLE_ENTERPRISE_ROLE_GRANT)
                 .label("启用企业角色授予")

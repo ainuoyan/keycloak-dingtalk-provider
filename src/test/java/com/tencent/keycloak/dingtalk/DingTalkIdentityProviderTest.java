@@ -34,6 +34,30 @@ class DingTalkIdentityProviderTest {
     }
 
     @Test
+    void enterpriseLoginGuardDefaultsToRequiredAndRequiresCorpId() {
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginRequired(null));
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginRequired(Map.of()));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), null));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), " "));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), "dingcorp001"));
+    }
+
+    @Test
+    void enterpriseLoginGuardHonorsAllowedCorpIdsAndExplicitDisable() {
+        Map<String, String> config = Map.of(
+                "allowedCorpIds", "dingcorp001, dingcorp002",
+                "requireEnterpriseUser", "true");
+
+        assertEquals(List.of("dingcorp001", "dingcorp002"),
+                DingTalkIdentityProvider.parseAllowedCorpIds(config));
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "dingcorp001"));
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "DINGCORP002"));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "dingcorp003"));
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(
+                Map.of("requireEnterpriseUser", "false"), null));
+    }
+
+    @Test
     void missingPhoneNumberSyncDefaultsToEnabledAndHonorsExplicitFalse() {
         assertTrue(DingTalkIdentityProvider.isMissingPhoneNumberSyncEnabled(null));
         assertTrue(DingTalkIdentityProvider.isMissingPhoneNumberSyncEnabled(Map.of()));

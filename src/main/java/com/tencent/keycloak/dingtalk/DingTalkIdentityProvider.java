@@ -81,6 +81,8 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
     private static final String IS_UPDATE_USER_INFO = "isUpdateUserInfo";
     private static final String SYNC_PHONE_NUMBER_IF_MISSING = "syncPhoneNumberIfMissing";
     private static final String ENTERPRISE_ID = "enterpriseId";
+    private static final String REQUIRE_ENTERPRISE_USER = "requireEnterpriseUser";
+    private static final String ALLOWED_CORP_IDS = "allowedCorpIds";
     static final String ENABLE_ENTERPRISE_ROLE_GRANT = "enableEnterpriseRoleGrant";
     private static final String MATCH_ACTION = "matchAction";
     private static final String MATCH_RULES = "matchRules";
@@ -314,6 +316,10 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         super.preprocessFederatedIdentity(session, realm, context);
 
         Map<String, String> config = context.getIdpConfig().getConfig();
+        if (!isEnterpriseLoginAllowed(config, context.getUserAttribute(CORP_ID))) {
+            throw new IdentityBrokerException("DingTalk login rejected: user is not from allowed enterprise");
+        }
+
         Optional<UserModel> linkedUser = findLinkedUser(session, realm, context);
         if (linkedUser.isPresent()) {
             UserModel user = linkedUser.get();
@@ -906,6 +912,42 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
 
     static boolean isCreateOnNoMatchAllowed(Map<String, String> config) {
         return config == null || Boolean.parseBoolean(config.getOrDefault(MATCH_ACTION, "true"));
+    }
+
+    static boolean isEnterpriseLoginRequired(Map<String, String> config) {
+        return config == null || Boolean.parseBoolean(config.getOrDefault(REQUIRE_ENTERPRISE_USER, "true"));
+    }
+
+    static boolean isEnterpriseLoginAllowed(Map<String, String> config, String corpId) {
+        if (!isEnterpriseLoginRequired(config)) {
+            return true;
+        }
+
+        String normalizedCorpId = StringUtils.trimToNull(corpId);
+        if (normalizedCorpId == null) {
+            return false;
+        }
+
+        List<String> allowedCorpIds = parseAllowedCorpIds(config);
+        return !allowedCorpIds.isEmpty()
+                && allowedCorpIds.stream().anyMatch(allowed -> allowed.equalsIgnoreCase(normalizedCorpId));
+    }
+
+    static List<String> parseAllowedCorpIds(Map<String, String> config) {
+        if (config == null) {
+            return List.of();
+        }
+
+        String value = config.get(ALLOWED_CORP_IDS);
+        if (StringUtils.isBlank(value)) {
+            return List.of();
+        }
+
+        return Arrays.stream(value.split("[,，;；\\s]+"))
+                .map(StringUtils::trimToNull)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .toList();
     }
 
     static boolean isEnterpriseRoleGrantEnabled(Map<String, String> config) {
