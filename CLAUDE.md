@@ -16,9 +16,10 @@
 - dry-run 是否不会写入用户、绑定、lastSync 或 IdP 配置。
 - 离职禁用在部门拉取失败时是否跳过。
 - 日志是否避免泄露手机号、邮箱、token、secret 和 OAuth code/state。
+- 浏览器公开入口失败时是否避免向调用方返回原始异常 message。
 - 钉钉机器人通知是否只在真实执行时发送，是否脱敏，发送失败是否不会中断登录或同步。
 - 钉钉机器人管理端测试发信接口是否要求 `manage-users` 权限。
 - 钉钉机器人浏览器 GET 测试发信接口是否必须受 `syncGetDebugEnabled` 和 `browserSyncDebugKey` 保护。
-- `README.md`、`dist/keycloak-dingtalk-provider.jar` 是否和当前源码一致。
+- `README.md` 的项目结构、`AI_CONTEXT.md` 的文件地图、`dist/keycloak-dingtalk-provider.jar` 是否和当前源码一致。
 
 验证命令见 `AI_CONTEXT.md` 的“构建与验证”部分。

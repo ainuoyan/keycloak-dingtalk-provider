@@ -3,7 +3,7 @@
 本文档用于让 Codex、Claude Code、Copilot 等 AI 工具快速理解和审计本项目。修改代码前先读本文档，再结合 `README.md` 和相关源码确认当前实现。
 
 创建时间：2026-04-26  
-创建参考基线：`ff981e9 Refresh DingTalk sync cleanup release artifact`
+最近同步范围：浏览器同步执行/预览、同步创建用户清理、钉钉机器人通知和浏览器 GET 测试发信入口
 
 ## 项目定位
 
@@ -24,12 +24,18 @@
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkIdentityProviderFactory.java` | Keycloak Provider 配置项、只读提示 URL、定时同步任务注册 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkUserSyncTask.java` | 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run、创建、绑定、更新、重新启用、禁用离职用户 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncAdminResource.java` | 管理端 REST 入口，需要 `manage-users` 权限 |
+| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncAdminResourceProvider*.java` | 管理端 REST Provider 和 Factory，注册 `/admin/realms/{realm}/dingtalk-sync/...` |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResource.java` | 浏览器公开入口，不需要 Bearer token，但必须开启 GET 调试开关并提供调试密钥 |
+| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResourceProvider*.java` | 浏览器公开 REST Provider 和 Factory，注册 `/realms/{realm}/dingtalk-sync/...` |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.java` | 清理由钉钉同步自动创建的 Keycloak 用户 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkWebhookNotifier.java` | 钉钉自定义机器人通知，支持加签、登录创建通知和同步批量通知 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkLoginEventListenerProvider.java` | 登录/注册事件监听，给历史钉钉用户补齐企业插件角色 |
+| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkLoginEventListenerProviderFactory.java` | 登录/注册事件监听 Factory |
 | `src/main/java/com/tencent/keycloak/dingtalk/PinyinUsername.java` | 中文姓名转拼音 username 规则 |
+| `src/main/java/com/tencent/keycloak/dingtalk/UserDto.java` / `UserTokenDto.java` | 钉钉用户信息和 token 响应 DTO |
+| `src/main/resources/META-INF/services/*` | Keycloak SPI 服务注册文件 |
 | `README.md` | 用户文档、配置说明、接口说明 |
+| `AGENTS.md` / `CLAUDE.md` | AI 工具入口说明，必须和 `AI_CONTEXT.md` 的边界保持一致 |
 | `dist/keycloak-dingtalk-provider.jar` | 仓库跟踪的可部署 JAR。代码变更后如要交付部署包，必须同步更新 |
 
 ## 高风险边界
@@ -119,6 +125,8 @@
 - `DingTalkSyncBrowserResource.validateBrowserAccess`
 - `DingTalkSyncBrowserResource.sync`
 - `DingTalkSyncBrowserResource.previewSyncCreatedUserCleanup`
+
+浏览器公开入口失败响应不应把原始异常 message 直接返回给调用方；详细异常只应进入 Keycloak 服务端日志。
 
 ### 钉钉机器人通知
 
@@ -232,7 +240,7 @@ mvn test
 mvn clean package
 git diff --check
 shasum -a 256 dist/keycloak-dingtalk-provider.jar target/keycloak-dingtalk-provider.jar
-jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup|WebhookNotifier|NumericUserCleanup)"
+jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncAdminResource|SyncBrowserResource|SyncCreatedUserCleanup|WebhookNotifier)"
 ```
 
 期望：
@@ -241,7 +249,7 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup
 - `mvn clean package` 通过。
 - `git diff --check` 无输出。
 - 如果更新了可部署包，`dist/keycloak-dingtalk-provider.jar` 应与 `target/keycloak-dingtalk-provider.jar` SHA 一致。
-- JAR 中应有 `DingTalkSyncCreatedUserCleanup` 和 `DingTalkWebhookNotifier`，不应有旧的 `DingTalkNumericUserCleanup`。
+- JAR 中应有 `DingTalkSyncAdminResource`、`DingTalkSyncBrowserResource`、`DingTalkSyncCreatedUserCleanup` 和 `DingTalkWebhookNotifier`，不应有旧的 `DingTalkNumericUserCleanup`。
 
 ## 发布包注意事项
 
@@ -265,10 +273,12 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup
 - dry-run 统计是否明显低报真实执行会发生的创建、绑定、更新、启用、禁用。
 - 任一部门拉取失败时，离职禁用是否会被跳过。
 - 日志是否泄露手机号、邮箱、token、secret、OAuth code、state。
+- 浏览器公开入口是否把原始异常 message 返回给调用方。
 - 钉钉机器人通知是否只在真实执行时发送，是否脱敏，发送失败是否不会中断主流程。
 - 钉钉机器人管理端测试接口是否要求 `manage-users` 权限。
 - 钉钉机器人浏览器 GET 测试接口是否必须受 `syncGetDebugEnabled` 和 `browserSyncDebugKey` 保护。
 - README 中的 URL、确认口令、权限说明是否和代码一致。
+- README 项目结构、`AI_CONTEXT.md` 文件地图、`AGENTS.md`、`CLAUDE.md` 是否和当前源码一致。
 - `dist` JAR 是否和当前源码构建结果一致。
 
 ## 不要轻易做的改动
@@ -280,3 +290,4 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup
 - 不要在 dry-run 中调用任何会改变 Keycloak 状态的方法。
 - 不要在日志里输出完整 access token、client secret、手机号、邮箱、userid、unionid、openid。
 - 不要把 Webhook access_token 或加签密钥写入日志或通知正文。
+- 不要把浏览器公开入口的失败响应做成原始异常透传。

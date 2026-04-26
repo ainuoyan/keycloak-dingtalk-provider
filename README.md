@@ -15,6 +15,9 @@
 - 自动同步用户信息（昵称、手机号、邮箱）
 - 支持企业内部应用 OAuth2.0 登录
 - 可选按企业 ID 授予 `ent-member:{企业ID}` 和 `ent-plugin-enabled:{企业ID}` 角色
+- 支持定时、手动和浏览器调试方式同步钉钉通讯录
+- 支持清理由当前钉钉同步任务自动创建的 Keycloak 用户
+- 支持钉钉机器人通知新建用户、跳过创建 WARN 和测试发信
 - 兼容 Keycloak 26.6.1+
 
 ## 技术栈
@@ -32,16 +35,33 @@
 ```
 keycloak-dingtalk-provider/
 ├── src/main/java/com/tencent/keycloak/dingtalk/
-│   ├── DingTalkIdentityProvider.java          # 核心 Provider 实现
-│   ├── DingTalkIdentityProviderFactory.java   # Factory 类
-│   ├── DingTalkLoginEventListenerProvider.java # 登录事件监听器
-│   ├── UserDto.java                           # 用户信息 DTO
-│   └── UserTokenDto.java                      # Token 响应 DTO
+│   ├── DingTalkIdentityProvider.java                   # 钉钉 OAuth 登录、企业用户校验、登录链路匹配/创建/更新
+│   ├── DingTalkIdentityProviderFactory.java            # Identity Provider 配置项、只读 URL、定时任务注册
+│   ├── DingTalkUserSyncTask.java                       # 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run
+│   ├── DingTalkSyncAdminResource.java                  # 管理端同步、清理、Webhook 测试 REST 入口
+│   ├── DingTalkSyncAdminResourceProvider.java          # 管理端 REST Provider
+│   ├── DingTalkSyncAdminResourceProviderFactory.java   # 管理端 REST Provider Factory
+│   ├── DingTalkSyncBrowserResource.java                # 浏览器公开调试入口，受 GET 调试开关和密钥保护
+│   ├── DingTalkSyncBrowserResourceProvider.java        # 浏览器公开 REST Provider
+│   ├── DingTalkSyncBrowserResourceProviderFactory.java # 浏览器公开 REST Provider Factory
+│   ├── DingTalkSyncCreatedUserCleanup.java             # 清理由钉钉同步自动创建的用户
+│   ├── DingTalkWebhookNotifier.java                    # 钉钉机器人通知与加签
+│   ├── DingTalkLoginEventListenerProvider.java         # 登录/注册事件监听器
+│   ├── DingTalkLoginEventListenerProviderFactory.java  # 登录/注册事件监听器 Factory
+│   ├── PinyinUsername.java                             # 中文姓名转拼音 username 规则
+│   ├── UserDto.java                                    # 用户信息 DTO
+│   └── UserTokenDto.java                               # Token 响应 DTO
 ├── src/test/java/com/tencent/keycloak/dingtalk/
 │   ├── DingTalkIdentityProviderTest.java
 │   └── DingTalkLoginEventListenerProviderTest.java
 ├── src/main/resources/META-INF/services/
-│   └── org.keycloak.broker.social.SocialIdentityProviderFactory  # SPI 注册
+│   ├── org.keycloak.broker.social.SocialIdentityProviderFactory
+│   ├── org.keycloak.events.EventListenerProviderFactory
+│   ├── org.keycloak.services.resource.RealmResourceProviderFactory
+│   └── org.keycloak.services.resources.admin.ext.AdminRealmResourceProviderFactory
+├── AI_CONTEXT.md                              # AI 工具项目上下文和审计清单
+├── AGENTS.md                                  # Codex/Agent 工作入口说明
+├── CLAUDE.md                                  # Claude Code 审计入口说明
 ├── dist/keycloak-dingtalk-provider.jar        # 已编译 JAR，可直接部署
 ├── pom.xml                                    # Maven 配置
 └── README.md                                  # 本文档
@@ -468,8 +488,17 @@ jar tf dist/keycloak-dingtalk-provider.jar | grep -E "(DingTalk|fastjson|pinyin4
 预期输出应包含：
 - `com/tencent/keycloak/dingtalk/DingTalkIdentityProvider.class`
 - `com/tencent/keycloak/dingtalk/DingTalkIdentityProviderFactory.class`
+- `com/tencent/keycloak/dingtalk/DingTalkUserSyncTask.class`
+- `com/tencent/keycloak/dingtalk/DingTalkSyncAdminResource.class`
+- `com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResource.class`
+- `com/tencent/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.class`
+- `com/tencent/keycloak/dingtalk/DingTalkWebhookNotifier.class`
+- `META-INF/services/org.keycloak.services.resource.RealmResourceProviderFactory`
+- `META-INF/services/org.keycloak.services.resources.admin.ext.AdminRealmResourceProviderFactory`
 - `com/alibaba/fastjson2/...`
 - `net/sourceforge/pinyin4j/...`
+
+不应包含旧的 `DingTalkNumericUserCleanup` 类。
 
 ### 检查日志
 

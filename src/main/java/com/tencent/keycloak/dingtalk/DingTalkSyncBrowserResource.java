@@ -76,7 +76,7 @@ public class DingTalkSyncBrowserResource {
                     realm.getName(), alias, dryRun);
             return json(Response.Status.INTERNAL_SERVER_ERROR,
                     Map.of("error", "sync_failed", "alias", alias, "dryRun", dryRun,
-                            "message", StringUtils.defaultString(e.getMessage())));
+                            "message", "Sync failed. Check Keycloak server logs for details."));
         } finally {
             session.getContext().setRealm(previousRealm);
         }
