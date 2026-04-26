@@ -45,7 +45,7 @@ keycloak-dingtalk-provider/
 │   ├── DingTalkSyncBrowserResourceProvider.java        # 浏览器公开 REST Provider
 │   ├── DingTalkSyncBrowserResourceProviderFactory.java # 浏览器公开 REST Provider Factory
 │   ├── DingTalkSyncCreatedUserCleanup.java             # 清理由钉钉同步自动创建的用户
-│   ├── DingTalkCreatedUserInitializer.java             # 同步创建提交后初始化临时密码、强制改密、启用并拆分姓名属性
+│   ├── DingTalkCreatedUserInitializer.java             # 同步创建提交后初始化临时密码、强制改密、启用并保存姓名拆分元数据
 │   ├── DingTalkWebhookNotifier.java                    # 钉钉机器人通知与加签
 │   ├── DingTalkLoginEventListenerProvider.java         # 登录/注册事件监听器
 │   ├── DingTalkLoginEventListenerProviderFactory.java  # 登录/注册事件监听器 Factory
@@ -163,7 +163,7 @@ services:
 | 定期同步字段 | 默认 `phone`，支持 `phone`、`email`；`nickname`、`dingtalk_userid` 等钉钉身份属性会始终记录 |
 | 定期同步覆盖已有字段 | 默认关闭，关闭时只补齐空字段；开启后用钉钉通讯录覆盖已存在的同步字段 |
 | 定期同步自动创建用户 | 默认关闭，开启后钉钉通讯录用户匹配不到时会自动创建 Keycloak 用户 |
-| 同步创建后初始化密码并启用 | 默认关闭。开启后，同步创建用户的事务提交成功后，会在独立事务中生成随机临时密码、设置强制首次改密，并启用用户；初始化提交成功后，再拆分中文姓名到 `firstName` / `lastName` 用户属性；临时密码不会写入日志或 Webhook |
+| 同步创建后初始化密码并启用 | 默认关闭。开启后，同步创建用户的事务提交成功后，会在独立事务中生成随机临时密码、设置强制首次改密，并启用用户；初始化提交成功后，再拆分中文姓名到 `dingtalk_first_name` / `dingtalk_last_name` 钉钉专用属性；临时密码不会写入日志或 Webhook |
 | 定期同步禁用离职用户 | 默认关闭，开启后禁用已由当前钉钉 IdP 托管或已绑定当前钉钉 IdP、但本次通讯录不存在的 Keycloak 用户 |
 | 禁用未出现在钉钉的外部存储用户 | 危险开关，默认关闭。仅在钉钉同步部门完整代表 AD 员工范围时开启；开启后会在写入同步字段前扫描 LDAP/AD 等外部存储用户，用 username、email、phoneNumber/mobile/telephoneNumber 与本次钉钉通讯录比对，未命中的已启用用户会被禁用。若任一 User Storage 开启 `removeInvalidUsersEnabled` 会跳过外部扫描；AD 机器账号（username 以 `$` 结尾）和 service account 不会被禁用 |
 | 定期同步重新启用返聘用户 | 默认开启。仅自动启用之前由本插件按 `missing_from_dingtalk` 禁用、且重新出现在钉钉通讯录的用户；不会启用同步刚创建或其他原因禁用的账号 |
@@ -477,7 +477,7 @@ https://your-keycloak-domain/realms/{realm}/dingtalk-sync/test-webhook?alias={id
 | `userId` | `dingtalk_userid` | 企业通讯录 userId，始终写入用户属性；不参与 username 生成，也不作为 `username` 匹配候选 |
 | `openId` | `dingtalk_openid` | 应用内唯一标识 |
 | `corpId` | `dingtalk_corpid` | 用于定位企业角色后缀 |
-| `nick` | `firstName` / `lastName` / `nickname` | 用户昵称。新建用户时会先把完整昵称写入 `firstName` 和 `nickname`，不拆分 `lastName`，避免 LDAP FullName/CN mapper 把中文名写成带空格的 `cn`；若开启创建后初始化，账号启用后会再拆分中文姓名到 `firstName` / `lastName` 用户属性 |
+| `nick` | `firstName` / `nickname` / `dingtalk_first_name` / `dingtalk_last_name` | 用户昵称。新建用户时会先把完整昵称写入 `firstName` 和 `nickname`，不拆分 `lastName`，避免 LDAP FullName/CN mapper 把中文名写成带空格的 `cn`；若开启创建后初始化，账号启用后会再拆分中文姓名到钉钉专用属性，不写 Keycloak 标准 `firstName` / `lastName` |
 | `mobile` | `phoneNumber` | 新建用户时按后台手动创建验证过的手机号属性写入，自动去除 `+86` 前缀；手机号匹配仍会兼容读取 `phoneNumber` / `mobile` / `telephoneNumber` |
 | `email` | `email` | 邮箱地址；同步新建用户创建成功后会开启 Keycloak 电子邮箱验证标记 |
 
@@ -498,7 +498,7 @@ https://your-keycloak-domain/realms/{realm}/dingtalk-sync/test-webhook?alias={id
 
 新用户创建会模拟后台 Admin Console 的 User Profile 创建路径，通过 `UserProfileProvider.create(USER_API, rawAttributes).create()` 把手动验证可创建 AD 用户的字段集合在创建阶段一次性传入：`username`、邮箱、`firstName`、`phoneNumber`、`nickname` 和钉钉 UserID。这样 Keycloak LDAP federation 同步注册到 AD 时，LDAP mapper 能在创建请求里看到这些属性，而不是先创建空用户再补字段。中文钉钉昵称完整写入 `firstName` 和 `nickname`，不拆分 `lastName`，例如 `丁杰` 写入 `firstName=丁杰`、`nickname=丁杰`。如果 LDAP provider 保留 FullName/CN mapper，AD `cn` 可落为 `丁杰`，避免 Keycloak 按 `firstName + 空格 + lastName` 生成 `丁 杰`；最终 `cn` 是否变为中文仍取决于 LDAP mapper 和 AD 写入权限。
 
-同步创建本身只负责创建账号和写入上述创建期属性，不写入密码，不在创建事务内强制启用用户，也不在创建后补写托管标记、用户名锁定标记或其他钉钉元数据。创建成功后会立即调用 `UserModel.setEmailVerified(true)`，开启 Keycloak 电子邮箱验证标记；这个标记不是 LDAP 普通属性映射，不通过 `rawAttributes` 伪装为普通 `emailVerified` 属性。开启“同步创建后初始化密码并启用”后，插件会等创建事务提交成功，再开启一个独立事务：生成 24 位强复杂度随机临时密码，通过 Keycloak credential manager 写入密码，添加 `UPDATE_PASSWORD` required action 强制首次改密，然后启用用户。初始化事务成功提交后，插件再开启第二个独立事务，把完整中文名按首字和剩余部分拆成 `firstName` / `lastName` 用户属性；这一步使用 `UserModel.setSingleAttribute(...)`，不调用 `setFirstName` / `setLastName` 根字段 setter，避免再次触发 LDAP FullName/CN mapper 把 AD `cn` 改成带空格中文名。临时密码不会进入日志、Webhook 或同步响应；如果需要把临时密码交付给用户，必须接入你们已有的安全分发渠道，或者由管理员后续在 Keycloak/AD 中重新重置密码。Webhook 新建用户成功通知会在提交后确认用户可查询后再发送。
+同步创建本身只负责创建账号和写入上述创建期属性，不写入密码，不在创建事务内强制启用用户，也不在创建后补写托管标记、用户名锁定标记或其他钉钉元数据。创建成功后会立即调用 `UserModel.setEmailVerified(true)`，开启 Keycloak 电子邮箱验证标记；这个标记不是 LDAP 普通属性映射，不通过 `rawAttributes` 伪装为普通 `emailVerified` 属性。开启“同步创建后初始化密码并启用”后，插件会等创建事务提交成功，再开启一个独立事务：生成 24 位强复杂度随机临时密码，通过 Keycloak credential manager 写入密码，添加 `UPDATE_PASSWORD` required action 强制首次改密，然后启用用户。初始化事务成功提交后，插件再开启第二个独立事务，把完整中文名按首字和剩余部分拆成 `dingtalk_first_name` / `dingtalk_last_name` 钉钉专用属性。这一步不能写 Keycloak 标准 `firstName` / `lastName`，也不能调用 `setFirstName` / `setLastName`；在 LDAP FullName/CN mapper 保留且可写的环境里，任何标准姓名字段更新都会触发 mapper 重新计算 AD `cn`，把 `丁杰` 改成 `丁 杰`。临时密码不会进入日志、Webhook 或同步响应；如果需要把临时密码交付给用户，必须接入你们已有的安全分发渠道，或者由管理员后续在 Keycloak/AD 中重新重置密码。Webhook 新建用户成功通知会在提交后确认用户可查询后再发送。
 
 username 只在创建新用户时生成，后续同步不会自动修改已有用户的 username。登录自动创建仍会尽力写入 `dingtalk_username_locked=true`、`dingtalk_username_source` 和 `dingtalk_username_suggested`，表示创建时的 username 决策已经锁定；定期同步创建为了保持 AD create-only，不在创建后补写这些属性。如果管理员发现多音字或特殊姓名导致 username 不符合规范，应在 Keycloak 或 AD 后台手动修正。后续钉钉同步不会把人工修正后的 username 改回自动拼音。
 

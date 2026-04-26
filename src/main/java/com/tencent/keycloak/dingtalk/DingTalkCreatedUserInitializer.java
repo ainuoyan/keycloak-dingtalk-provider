@@ -23,6 +23,8 @@ final class DingTalkCreatedUserInitializer {
 
     static final String INITIALIZE_CREATED_USERS = "periodicSyncInitializeCreatedUsers";
     static final int TEMPORARY_PASSWORD_LENGTH = 24;
+    static final String DINGTALK_FIRST_NAME = "dingtalk_first_name";
+    static final String DINGTALK_LAST_NAME = "dingtalk_last_name";
 
     private static final Logger logger = Logger.getLogger(DingTalkCreatedUserInitializer.class);
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -112,14 +114,14 @@ final class DingTalkCreatedUserInitializer {
             KeycloakModelUtils.runJobInTransaction(sessionFactory, sourceContext, initSession -> {
                 RealmModel currentRealm = DingTalkUserSyncTask.resolveRealmAndBindContext(initSession, realmId);
                 if (currentRealm == null) {
-                    logger.warnf("Skip DingTalk created user profile-name split because realm cannot be resolved. realm=%s, idp=%s, username=%s",
+                    logger.warnf("Skip DingTalk created user local name split because realm cannot be resolved. realm=%s, idp=%s, username=%s",
                             realmName, idpAlias, username);
                     return;
                 }
-                splitInitializedUserName(initSession, currentRealm, idpAlias, username);
+                storeInitializedUserNameParts(initSession, currentRealm, idpAlias, username);
             });
         } catch (Exception e) {
-            logger.warnf(e, "Failed to split DingTalk created user profile name after initialization. realm=%s, idp=%s, username=%s",
+            logger.warnf(e, "Failed to store DingTalk created user local name parts after initialization. realm=%s, idp=%s, username=%s",
                     realmName, idpAlias, username);
         }
     }
@@ -165,58 +167,53 @@ final class DingTalkCreatedUserInitializer {
         }
     }
 
-    static boolean splitInitializedUserName(KeycloakSession session, RealmModel realm,
-                                            String idpAlias, String username) {
+    static boolean storeInitializedUserNameParts(KeycloakSession session, RealmModel realm,
+                                                 String idpAlias, String username) {
         UserModel user = session.users().getUserByUsername(realm, username);
         if (user == null) {
-            logger.warnf("Skip DingTalk created user profile-name split because user is not searchable. realm=%s, idp=%s, username=%s",
+            logger.warnf("Skip DingTalk created user local name split because user is not searchable. realm=%s, idp=%s, username=%s",
                     realmName(realm), idpAlias, username);
             return false;
         }
-        return applyPostActivationNameAttributes(realm, idpAlias, user);
+        return applyPostActivationNameMetadata(realm, idpAlias, user);
     }
 
-    static boolean applyPostActivationNameAttributes(RealmModel realm, String idpAlias, UserModel user) {
+    static boolean applyPostActivationNameMetadata(RealmModel realm, String idpAlias, UserModel user) {
         String username = user == null ? "" : user.getUsername();
         if (user == null) {
             return false;
         }
 
-        NameParts nameParts = splitChineseDisplayName(resolveDisplayName(user));
+        NameParts nameParts = resolveNameParts(user);
         if (!nameParts.hasBoth()) {
             return false;
         }
 
         try {
-            user.setSingleAttribute(UserModel.FIRST_NAME, nameParts.firstName());
-            user.setSingleAttribute(UserModel.LAST_NAME, nameParts.lastName());
-            logger.infof("Split DingTalk created user profile name after initialization. realm=%s, idp=%s, username=%s, attributes=[firstName,lastName]",
-                    realmName(realm), idpAlias, username);
+            user.setSingleAttribute(DINGTALK_FIRST_NAME, nameParts.firstName());
+            user.setSingleAttribute(DINGTALK_LAST_NAME, nameParts.lastName());
+            logger.infof("Stored DingTalk created user local name parts after initialization. realm=%s, idp=%s, username=%s, attributes=[%s,%s]",
+                    realmName(realm), idpAlias, username, DINGTALK_FIRST_NAME, DINGTALK_LAST_NAME);
             return true;
         } catch (Exception e) {
-            logger.warnf(e, "Failed to split DingTalk created user profile name. realm=%s, idp=%s, username=%s",
+            logger.warnf(e, "Failed to store DingTalk created user local name parts. realm=%s, idp=%s, username=%s",
                     realmName(realm), idpAlias, username);
             return false;
         }
     }
 
-    private static String resolveDisplayName(UserModel user) {
-        return firstNotBlank(
+    private static NameParts resolveNameParts(UserModel user) {
+        String[] candidates = {
                 user.getFirstName(),
-                user.getFirstAttribute(NICK_NAME));
-    }
-
-    private static String firstNotBlank(String... candidates) {
-        if (candidates == null) {
-            return null;
-        }
+                user.getFirstAttribute(NICK_NAME)
+        };
         for (String candidate : candidates) {
-            String value = StringUtils.trimToNull(candidate);
-            if (value != null) {
-                return value;
+            NameParts nameParts = splitChineseDisplayName(candidate);
+            if (nameParts.hasBoth()) {
+                return nameParts;
             }
         }
-        return null;
+        return NameParts.empty();
     }
 
     static NameParts splitChineseDisplayName(String displayName) {

@@ -564,16 +564,18 @@ class DingTalkIdentityProviderTest {
     }
 
     @Test
-    void createdUserInitializerSplitsChineseDisplayNameIntoPostActivationAttributes() {
+    void createdUserInitializerStoresChineseNamePartsWithoutProfileRootUpdates() {
         Map<String, String> attributes = new HashMap<>();
         UserModel user = (UserModel) Proxy.newProxyInstance(
                 DingTalkIdentityProviderTest.class.getClassLoader(),
                 new Class<?>[] {UserModel.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getUsername" -> "dingjie";
-                    case "getFirstName" -> "丁 杰";
-                    case "getFirstAttribute" -> null;
+                    case "getFirstName" -> "丁";
+                    case "getFirstAttribute" -> "nickname".equals(args[0]) ? "丁杰" : null;
                     case "setSingleAttribute" -> {
+                        assertFalse(UserModel.FIRST_NAME.equals(args[0]));
+                        assertFalse(UserModel.LAST_NAME.equals(args[0]));
                         attributes.put((String) args[0], (String) args[1]);
                         yield null;
                     }
@@ -583,11 +585,13 @@ class DingTalkIdentityProviderTest {
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
 
-        assertTrue(DingTalkCreatedUserInitializer.applyPostActivationNameAttributes(
+        assertTrue(DingTalkCreatedUserInitializer.applyPostActivationNameMetadata(
                 realmWithName("master"), "dingtalk", user));
 
-        assertEquals("丁", attributes.get(UserModel.FIRST_NAME));
-        assertEquals("杰", attributes.get(UserModel.LAST_NAME));
+        assertEquals("丁", attributes.get(DingTalkCreatedUserInitializer.DINGTALK_FIRST_NAME));
+        assertEquals("杰", attributes.get(DingTalkCreatedUserInitializer.DINGTALK_LAST_NAME));
+        assertFalse(attributes.containsKey(UserModel.FIRST_NAME));
+        assertFalse(attributes.containsKey(UserModel.LAST_NAME));
     }
 
     @Test
