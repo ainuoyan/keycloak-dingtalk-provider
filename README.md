@@ -264,11 +264,13 @@ https://your-keycloak-domain/realms/{realm}/dingtalk-sync/run?alias={idpAlias}&k
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={idpAlias}&key={浏览器同步调试密钥}
 ```
 
-浏览器入口永远只做 dry-run，不会删除用户。确认名单无误后，使用管理端接口执行删除，调用者必须具备 `manage-users` 权限：
+浏览器入口永远只做 dry-run，不会删除用户。管理端也可以用 GET 做 dry-run 预览；该 GET 预览同样要求调用者具备 `manage-users` 权限，并且需要先开启“启用 GET 同步调试入口”：
 
 ```text
 https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={idpAlias}
 ```
+
+确认名单无误后，使用管理端 POST 执行删除；POST 不依赖 GET 调试开关，但调用者必须具备 `manage-users` 权限，并且必须带确认口令：
 
 ```bash
 curl -X POST \
