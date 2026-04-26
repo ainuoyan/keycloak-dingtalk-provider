@@ -56,38 +56,14 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
     private static final String ENDPOINT_REFERENCE_HELP =
-            "接口地址在下方“接口地址参考”字段逐条显示；这些字段只用于后台查看和复制，插件运行时不会读取它们。";
+            "接口地址可通过下方“接口地址页面模板”查看；打开对应 realm 页面后可生成、复制和打开同步、清理、Webhook 测试地址。";
     private static final String ENDPOINT_REFERENCE_HELP_TEXT =
-            "只读地址参考，不参与运行配置；如果当前 Keycloak 管理台允许打开下拉，也只能选择这个固定地址。";
+            "固定入口模板，不参与运行配置；将 {realm} 替换为当前 realm，或打开后在页面内选择钉钉 IdP。";
     private static final List<EndpointReference> ENDPOINT_REFERENCES = List.of(
             new EndpointReference(
-                    "dingtalkEndpointReferenceManualSync",
-                    "接口地址参考 1 - 管理同步 POST",
-                    "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}"),
-            new EndpointReference(
-                    "dingtalkEndpointReferenceBrowserSyncRun",
-                    "接口地址参考 2 - 浏览器同步执行 GET",
-                    "/realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC"),
-            new EndpointReference(
-                    "dingtalkEndpointReferenceBrowserSyncPreview",
-                    "接口地址参考 3 - 浏览器同步预览 GET",
-                    "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}"),
-            new EndpointReference(
-                    "dingtalkEndpointReferenceBrowserCleanupPreview",
-                    "接口地址参考 4 - 浏览器清理预览 GET",
-                    "/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}"),
-            new EndpointReference(
-                    "dingtalkEndpointReferenceAdminCleanupExecute",
-                    "接口地址参考 5 - 管理清理执行 POST",
-                    "/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS"),
-            new EndpointReference(
-                    "dingtalkEndpointReferenceAdminWebhookTest",
-                    "接口地址参考 6 - 管理 Webhook 测试 POST",
-                    "/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}"),
-            new EndpointReference(
-                    "dingtalkEndpointReferenceBrowserWebhookTest",
-                    "接口地址参考 7 - 浏览器 Webhook 测试 GET",
-                    "/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}"));
+                    "dingtalkEndpointReferencePage",
+                    "接口地址页面模板",
+                    "/realms/{realm}/dingtalk-sync/endpoints"));
 
     @Override
     public String getName() {
@@ -258,7 +234,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(BROWSER_SYNC_DEBUG_KEY)
                 .label("浏览器同步调试密钥")
-                .helpText("配合“启用 GET 同步调试入口”使用。两者同时有效时才允许纯浏览器 GET 预览和正式同步")
+                .helpText("配合“启用 GET 同步调试入口”使用。两者同时有效时才允许纯浏览器 GET 预览、正式同步和 Webhook 测试")
                 .type(ProviderConfigProperty.PASSWORD)
                 .secret(true)
                 .add()

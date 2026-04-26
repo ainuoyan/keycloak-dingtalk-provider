@@ -112,6 +112,12 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             session.getContext().setRealm(realm);
             task.run();
         } finally {
+            restorePreviousRealm(session, previousRealm);
+        }
+    }
+
+    private void restorePreviousRealm(KeycloakSession session, RealmModel previousRealm) {
+        if (previousRealm != null) {
             session.getContext().setRealm(previousRealm);
         }
     }

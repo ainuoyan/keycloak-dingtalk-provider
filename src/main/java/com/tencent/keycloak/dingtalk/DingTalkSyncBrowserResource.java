@@ -1,14 +1,21 @@
 package com.tencent.keycloak.dingtalk;
 
+import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.apache.commons.lang3.StringUtils;
 import org.jboss.logging.Logger;
 import org.keycloak.models.IdentityProviderModel;
@@ -23,6 +30,39 @@ public class DingTalkSyncBrowserResource {
 
     DingTalkSyncBrowserResource(KeycloakSession session) {
         this.session = session;
+    }
+
+    @GET
+    @Path("endpoints")
+    public Response endpoints(@QueryParam("alias") String alias,
+                              @QueryParam("key") String key,
+                              @Context UriInfo uriInfo) {
+        RealmModel realm = session.getContext().getRealm();
+        if (realm == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .type(MediaType.TEXT_PLAIN_TYPE)
+                    .entity("Realm not found")
+                    .build();
+        }
+
+        List<String> aliases = getDingTalkProviderAliases(realm);
+        String selectedAlias = StringUtils.defaultString(alias);
+        if (StringUtils.isBlank(selectedAlias) && aliases.size() == 1) {
+            selectedAlias = aliases.get(0);
+        }
+        IdentityProviderModel selectedIdp = StringUtils.isNotBlank(selectedAlias)
+                ? getDingTalkProvider(realm, selectedAlias)
+                : null;
+
+        String html = renderEndpointsPage(realm, aliases, selectedAlias, key, selectedIdp, uriInfo);
+        return Response.ok(html)
+                .type(MediaType.TEXT_HTML + "; charset=UTF-8")
+                .header("Cache-Control", "no-store")
+                .header("Content-Security-Policy",
+                        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                                + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+                .header("Pragma", "no-cache")
+                .build();
     }
 
     @GET
@@ -78,7 +118,7 @@ public class DingTalkSyncBrowserResource {
                     Map.of("error", "sync_failed", "alias", alias, "dryRun", dryRun,
                             "message", "Sync failed. Check Keycloak server logs for details."));
         } finally {
-            session.getContext().setRealm(previousRealm);
+            restorePreviousRealm(previousRealm);
         }
     }
 
@@ -178,6 +218,12 @@ public class DingTalkSyncBrowserResource {
         ), MediaType.APPLICATION_JSON_TYPE).build();
     }
 
+    private void restorePreviousRealm(RealmModel previousRealm) {
+        if (previousRealm != null) {
+            session.getContext().setRealm(previousRealm);
+        }
+    }
+
     private IdentityProviderModel getDingTalkProvider(RealmModel realm, String alias) {
         if (realm == null || StringUtils.isBlank(alias)) {
             return null;
@@ -188,6 +234,18 @@ public class DingTalkSyncBrowserResource {
                 .filter(provider -> alias.equals(provider.getAlias()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private List<String> getDingTalkProviderAliases(RealmModel realm) {
+        if (realm == null) {
+            return List.of();
+        }
+        return realm.getIdentityProvidersStream()
+                .filter(provider -> DingTalkIdentityProviderFactory.PROVIDER_ID.equals(provider.getProviderId()))
+                .filter(IdentityProviderModel::isEnabled)
+                .map(IdentityProviderModel::getAlias)
+                .sorted(Comparator.naturalOrder())
+                .toList();
     }
 
     private IdentityProviderModel getAuthorizedDingTalkProvider(RealmModel realm, String alias, String key) {
@@ -221,4 +279,194 @@ public class DingTalkSyncBrowserResource {
         byte[] actualBytes = actual.getBytes(StandardCharsets.UTF_8);
         return MessageDigest.isEqual(expectedBytes, actualBytes);
     }
+
+    private String renderEndpointsPage(RealmModel realm, List<String> aliases, String alias, String key,
+                                       IdentityProviderModel selectedIdp, UriInfo uriInfo) {
+        String browserBase = trimTrailingSlash(uriInfo.getBaseUriBuilder()
+                .path(DingTalkSyncBrowserResourceProviderFactory.PROVIDER_ID)
+                .build()
+                .toString());
+        URI adminBaseUri = uriInfo.getBaseUri().resolve("../../admin/realms/"
+                + urlEncodePath(realm.getName()) + "/"
+                + DingTalkSyncAdminResourceProviderFactory.PROVIDER_ID + "/");
+        String adminBase = trimTrailingSlash(adminBaseUri.toString());
+
+        String displayAlias = StringUtils.defaultIfBlank(alias, "{alias}");
+        String displayKey = StringUtils.defaultIfBlank(key, "{浏览器同步调试密钥}");
+        boolean hasAlias = StringUtils.isNotBlank(alias);
+        boolean hasKey = StringUtils.isNotBlank(key);
+
+        List<EndpointRow> rows = new ArrayList<>();
+        rows.add(new EndpointRow("管理同步", "POST",
+                endpointUrl(adminBase, "run", "alias", displayAlias),
+                "真实同步；需要 Authorization Bearer 管理端 token 和 manage-users 权限。", null, false));
+        rows.add(new EndpointRow("管理同步", "GET",
+                endpointUrl(adminBase, "run", "alias", displayAlias, "confirm", DingTalkSyncAdminResource.RUN_CONFIRM),
+                "真实同步；需要 GET 调试开关、Bearer token、manage-users 权限和确认参数。", null, true));
+        rows.add(new EndpointRow("管理同步预览", "GET",
+                endpointUrl(adminBase, "debug", "alias", displayAlias),
+                "dry-run；需要 GET 调试开关、Bearer token 和 manage-users 权限。", null, false));
+        rows.add(new EndpointRow("浏览器同步执行", "GET",
+                endpointUrl(browserBase, "run", "alias", displayAlias, "key", displayKey,
+                        "confirm", DingTalkSyncAdminResource.RUN_CONFIRM),
+                "真实同步；需要 GET 调试开关、正确密钥和确认参数。", hasAlias && hasKey
+                        ? endpointUrl(browserBase, "run", "alias", alias, "key", key,
+                        "confirm", DingTalkSyncAdminResource.RUN_CONFIRM)
+                        : null, true));
+        rows.add(new EndpointRow("浏览器同步预览", "GET",
+                endpointUrl(browserBase, "debug", "alias", displayAlias, "key", displayKey),
+                "dry-run；需要 GET 调试开关和正确密钥。", hasAlias && hasKey
+                        ? endpointUrl(browserBase, "debug", "alias", alias, "key", key)
+                        : null, false));
+        rows.add(new EndpointRow("浏览器清理预览", "GET",
+                endpointUrl(browserBase, "cleanup-sync-created-users", "alias", displayAlias, "key", displayKey),
+                "dry-run；只预览由当前钉钉同步任务创建的用户，不删除。", hasAlias && hasKey
+                        ? endpointUrl(browserBase, "cleanup-sync-created-users", "alias", alias, "key", key)
+                        : null, false));
+        rows.add(new EndpointRow("管理清理预览", "GET",
+                endpointUrl(adminBase, "cleanup-sync-created-users", "alias", displayAlias),
+                "dry-run；需要 GET 调试开关、Bearer token 和 manage-users 权限。", null, false));
+        rows.add(new EndpointRow("管理清理执行", "POST",
+                endpointUrl(adminBase, "cleanup-sync-created-users", "alias", displayAlias,
+                        "confirm", DingTalkSyncCreatedUserCleanup.CONFIRM),
+                "真实删除；仅删除由当前钉钉同步任务创建并标记的用户，需要 Bearer token、manage-users 权限和确认参数。", null, true));
+        rows.add(new EndpointRow("管理 Webhook 测试", "POST",
+                endpointUrl(adminBase, "test-webhook", "alias", displayAlias),
+                "发送测试消息；需要 Bearer token 和 manage-users 权限。", null, false));
+        rows.add(new EndpointRow("浏览器 Webhook 测试", "GET",
+                endpointUrl(browserBase, "test-webhook", "alias", displayAlias, "key", displayKey),
+                "发送测试消息；需要 GET 调试开关和正确密钥。", hasAlias && hasKey
+                        ? endpointUrl(browserBase, "test-webhook", "alias", alias, "key", key)
+                        : null, true));
+
+        StringBuilder html = new StringBuilder(12_000);
+        html.append("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
+                .append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+                .append("<title>钉钉同步接口地址</title>")
+                .append("<style>")
+                .append("body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;background:#f6f7f9;color:#151515}")
+                .append("main{max-width:1120px;margin:0 auto;padding:28px 20px 48px}")
+                .append("h1{font-size:24px;margin:0 0 8px}p{line-height:1.6}.muted{color:#666}")
+                .append(".panel{background:#fff;border:1px solid #d8d8d8;border-radius:6px;padding:18px;margin:18px 0}")
+                .append("label{display:block;font-weight:600;margin:0 0 6px}.formgrid{display:grid;grid-template-columns:1fr 1fr auto;gap:14px;align-items:end}")
+                .append("input,select{box-sizing:border-box;width:100%;height:38px;border:1px solid #8a8d90;border-radius:4px;padding:6px 10px;font-size:14px;background:white}")
+                .append("button,.open{height:38px;border:1px solid #0066cc;background:#0066cc;color:white;border-radius:4px;padding:0 14px;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}")
+                .append("button.secondary{border-color:#8a8d90;background:white;color:#151515}.open.warn{background:#b13800;border-color:#b13800}")
+                .append(".notice{border-left:4px solid #f0ab00;background:#fff7db;padding:10px 12px;margin:14px 0}")
+                .append(".error{border-left-color:#c9190b;background:#faeae8}.ok{border-left-color:#3e8635;background:#eef7ed}")
+                .append("table{width:100%;border-collapse:collapse;background:white}th,td{border-bottom:1px solid #d8d8d8;padding:10px;text-align:left;vertical-align:top}")
+                .append("th{font-size:13px;color:#4d5258;background:#f0f0f0}.method{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700}")
+                .append(".urlrow{display:flex;gap:8px;align-items:center}.urlrow input{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}")
+                .append(".actions{display:flex;gap:8px;flex-wrap:wrap}.note{font-size:13px;color:#555;line-height:1.5;margin-top:6px}")
+                .append("@media(max-width:800px){.formgrid{grid-template-columns:1fr}.urlrow{display:block}.urlrow button{margin-top:8px;width:100%}th:nth-child(2),td:nth-child(2){display:none}}")
+                .append("</style></head><body><main>");
+
+        html.append("<h1>钉钉同步接口地址</h1>")
+                .append("<p class=\"muted\">当前 Realm: <strong>")
+                .append(escapeHtml(realm.getName()))
+                .append("</strong>。此页面只生成和展示地址，不会自动执行同步、清理或发信。</p>");
+
+        if (aliases.isEmpty()) {
+            html.append("<div class=\"notice error\">当前 Realm 没有启用的钉钉 Identity Provider。</div>");
+        } else if (StringUtils.isNotBlank(alias) && selectedIdp == null) {
+            html.append("<div class=\"notice error\">找不到启用的钉钉 Identity Provider: <strong>")
+                    .append(escapeHtml(alias))
+                    .append("</strong></div>");
+        } else if (selectedIdp != null) {
+            html.append("<div class=\"notice ")
+                    .append(DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(selectedIdp) ? "ok" : "")
+                    .append("\">GET 同步调试入口当前为 <strong>")
+                    .append(DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(selectedIdp) ? "开启" : "关闭")
+                    .append("</strong>。浏览器 GET 入口还需要填写正确的浏览器同步调试密钥。</div>");
+        }
+
+        html.append("<section class=\"panel\"><form method=\"get\"><div class=\"formgrid\"><div><label for=\"alias\">钉钉 IdP alias</label>");
+        if (aliases.isEmpty()) {
+            html.append("<input id=\"alias\" name=\"alias\" value=\"").append(escapeHtml(alias)).append("\">");
+        } else {
+            html.append("<select id=\"alias\" name=\"alias\">");
+            if (StringUtils.isBlank(alias) && aliases.size() > 1) {
+                html.append("<option value=\"\">请选择</option>");
+            }
+            for (String candidate : aliases) {
+                html.append("<option value=\"").append(escapeHtml(candidate)).append("\"")
+                        .append(candidate.equals(alias) ? " selected" : "")
+                        .append(">").append(escapeHtml(candidate)).append("</option>");
+            }
+            html.append("</select>");
+        }
+        html.append("</div><div><label for=\"key\">浏览器同步调试密钥</label>")
+                .append("<input id=\"key\" name=\"key\" type=\"password\" autocomplete=\"off\" value=\"")
+                .append(escapeHtml(StringUtils.defaultString(key)))
+                .append("\" placeholder=\"不会从服务端读取，只使用你本次输入的值\">")
+                .append("</div><button type=\"submit\">生成地址</button></div></form></section>");
+
+        html.append("<section class=\"panel\"><table><thead><tr><th>用途</th><th>方法</th><th>地址</th></tr></thead><tbody>");
+        for (EndpointRow row : rows) {
+            html.append("<tr><td>").append(escapeHtml(row.name()))
+                    .append("<div class=\"note\">").append(escapeHtml(row.note())).append("</div></td>")
+                    .append("<td class=\"method\">").append(escapeHtml(row.method())).append("</td><td>")
+                    .append("<div class=\"urlrow\"><input readonly value=\"").append(escapeHtml(row.url())).append("\">")
+                    .append("<div class=\"actions\"><button type=\"button\" class=\"secondary\" data-copy=\"")
+                    .append(escapeHtml(row.url())).append("\">复制</button>");
+            if (row.openUrl() != null) {
+                html.append("<a class=\"open")
+                        .append(row.dangerous() ? " warn" : "")
+                        .append("\" target=\"_blank\" rel=\"noopener\" href=\"")
+                        .append(escapeHtml(row.openUrl())).append("\">打开</a>");
+            }
+            html.append("</div></div></td></tr>");
+        }
+        html.append("</tbody></table></section>");
+
+        html.append("<p class=\"muted\">浏览器执行同步和 Webhook 测试会真实产生动作。调试完成后请关闭“启用 GET 同步调试入口”并清空调试密钥。</p>")
+                .append("<script>")
+                .append("document.querySelectorAll('[data-copy]').forEach(function(btn){btn.addEventListener('click',async function(){try{await navigator.clipboard.writeText(btn.getAttribute('data-copy'));var old=btn.textContent;btn.textContent='已复制';setTimeout(function(){btn.textContent=old},1200)}catch(e){btn.textContent='复制失败'}})});")
+                .append("</script></main></body></html>");
+        return html.toString();
+    }
+
+    private String endpointUrl(String base, String path, String... queryPairs) {
+        StringBuilder url = new StringBuilder(base);
+        if (!base.endsWith("/")) {
+            url.append('/');
+        }
+        url.append(path);
+        if (queryPairs.length > 0) {
+            url.append('?');
+            for (int i = 0; i < queryPairs.length; i += 2) {
+                if (i > 0) {
+                    url.append('&');
+                }
+                url.append(urlEncode(queryPairs[i])).append('=').append(urlEncode(queryPairs[i + 1]));
+            }
+        }
+        return url.toString();
+    }
+
+    private String urlEncode(String value) {
+        if (value.startsWith("{") && value.endsWith("}")) {
+            return value;
+        }
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String urlEncodePath(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private String trimTrailingSlash(String value) {
+        return StringUtils.removeEnd(value, "/");
+    }
+
+    private String escapeHtml(String value) {
+        return StringUtils.defaultString(value)
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
+    }
+
+    private record EndpointRow(String name, String method, String url, String note, String openUrl, boolean dangerous) {}
 }

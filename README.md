@@ -41,7 +41,7 @@ keycloak-dingtalk-provider/
 │   ├── DingTalkSyncAdminResource.java                  # 管理端同步、清理、Webhook 测试 REST 入口
 │   ├── DingTalkSyncAdminResourceProvider.java          # 管理端 REST Provider
 │   ├── DingTalkSyncAdminResourceProviderFactory.java   # 管理端 REST Provider Factory
-│   ├── DingTalkSyncBrowserResource.java                # 浏览器公开调试入口，受 GET 调试开关和密钥保护
+│   ├── DingTalkSyncBrowserResource.java                # 浏览器公开地址页面和调试入口，执行型入口受 GET 调试开关和密钥保护
 │   ├── DingTalkSyncBrowserResourceProvider.java        # 浏览器公开 REST Provider
 │   ├── DingTalkSyncBrowserResourceProviderFactory.java # 浏览器公开 REST Provider Factory
 │   ├── DingTalkSyncCreatedUserCleanup.java             # 清理由钉钉同步自动创建的用户
@@ -167,10 +167,12 @@ services:
 | 启用钉钉机器人通知 | 默认关闭；开启并配置 Webhook 后，登录链路新创建用户、同步真实执行中新创建用户，以及同步真实执行中因 `username` 为空或 `username` 冲突跳过创建的 WARN 会发送到钉钉机器人 |
 | 钉钉机器人 Webhook 地址 | 钉钉自定义机器人 Webhook 地址，通常包含 `access_token`，按敏感字段保存；为空时不发送通知 |
 | 钉钉机器人加签密钥 | 如果钉钉机器人启用了加签安全设置，填写 `SEC...` 密钥；未启用加签时留空 |
-| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址会在后台下方的“接口地址参考”字段逐条显示 |
-| 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览和正式同步 |
+| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址可通过后台下方的“接口地址页面模板”入口查看 |
+| 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览、正式同步和 Webhook 测试 |
 
-> 后台会显示 7 条“接口地址参考”字段：管理同步 POST、浏览器同步执行 GET、浏览器同步预览 GET、浏览器清理预览 GET、管理清理执行 POST、管理 Webhook 测试 POST、浏览器 Webhook 测试 GET。Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该组件；因此这些地址用单选固定值展示，不能输入任意 URL。即使 Keycloak 管理台把字段值随表单一起保存，插件运行时也不会读取这些参考字段，真实接口地址始终由 REST Provider 路由决定。
+> 后台会显示一个固定的“接口地址页面模板”入口：`/realms/{realm}/dingtalk-sync/endpoints`。这是展示用模板，不会在插件启动时写入或更新 IdP 配置；把 `{realm}` 替换为当前 realm 后打开页面，即可选择钉钉 IdP、临时填写本次浏览器同步调试密钥，并生成、复制和打开管理同步、浏览器同步、清理、Webhook 测试地址。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由 REST Provider 路由决定。
+
+> Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该组件。插件因此只在配置页放一个固定入口模板，复制按钮和打开按钮放在插件自己的接口地址页面里。该入口模板不参与运行配置，插件运行时不会读取它。
 
 > `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 
@@ -243,6 +245,22 @@ https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?***
 ### 手动触发钉钉同步
 
 插件提供了一个管理端手动同步入口，方便测试和排障。POST 会执行真实同步，并且会先校验当前调用者是否具备当前 realm 的 `manage-users` 权限。GET 真实同步默认关闭；只有短期开启“启用 GET 同步调试入口”后才可用，并且还要求显式追加 `confirm=RUN_DINGTALK_SYNC`，避免浏览器误点或 CSRF 式误触发。
+
+如需页面化查看、复制和打开所有同步相关地址，可以访问插件接口地址页面：
+
+```text
+https://your-keycloak-domain/realms/{realm}/dingtalk-sync/endpoints?alias={idpAlias}
+```
+
+`{realm}` 是当前 realm 名称，例如 `master`；它不是从 Keycloak 管理台当前页面 hash 自动拼接的，而是访问 `/realms/<realm>/...` 时由服务端请求路径确定。`alias` 可以省略，当前 realm 只有一个启用的钉钉 IdP 时页面会自动选中，否则需要在页面里选择或在 URL 中传入。
+
+如果在 URL 中追加本次调试密钥，页面会为浏览器 GET 入口显示“打开”按钮：
+
+```text
+https://your-keycloak-domain/realms/{realm}/dingtalk-sync/endpoints?alias={idpAlias}&key={浏览器同步调试密钥}
+```
+
+该页面不会从服务端读取密钥，也不会自动执行同步、清理或发信。密钥只用于本次页面生成浏览器 GET 地址，因此同样可能进入浏览器历史或截图；调试完成后请关闭“启用 GET 同步调试入口”并清空密钥。
 
 ```bash
 curl -X POST \
@@ -577,7 +595,19 @@ docker exec keycloak /opt/keycloak/bin/kc.sh build --verbose
 docker restart keycloak
 ```
 
-### 问题 4: OAuth 错误 "invalid_client"
+### 问题 4: 启动失败 "currentRealm is null"
+
+**症状**：Keycloak 启动时报错：
+
+```text
+ERROR: Cannot invoke "Object.equals(Object)" because "currentRealm" is null
+```
+
+**原因**：Provider 启动阶段没有浏览器请求上下文，不能依赖“当前 realm”，也不应在 `postInit` 中遍历并回写 Identity Provider 配置。接口地址页面必须通过 `/realms/<realm>/dingtalk-sync/endpoints` 运行时请求路径生成实际地址。
+
+**解决方案**：确认使用的是不在启动阶段写入 IdP 配置的新 JAR，替换后重新执行 `kc.sh build` 并重启 Keycloak。
+
+### 问题 5: OAuth 错误 "invalid_client"
 
 **症状**：授权时钉钉返回错误
 
@@ -586,7 +616,7 @@ docker restart keycloak
 2. 确保没有多余的空格
 3. 重新配置 Keycloak IDP
 
-### 问题 5: 回调地址错误 "redirect_uri_mismatch"
+### 问题 6: 回调地址错误 "redirect_uri_mismatch"
 
 **症状**：授权后跳转失败
 
@@ -597,7 +627,7 @@ docker restart keycloak
 - ✅ 路径：`/realms/{realm}/broker/dingtalk/endpoint`
 - ❌ 末尾不要加多余的 `/`
 
-### 问题 6: 用户信息未同步
+### 问题 7: 用户信息未同步
 
 **症状**：登录成功但用户属性为空
 

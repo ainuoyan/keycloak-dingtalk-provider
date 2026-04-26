@@ -69,7 +69,7 @@ public class DingTalkSyncAdminResource {
 
             return syncResultResponse(result, true);
         } finally {
-            session.getContext().setRealm(previousRealm);
+            restorePreviousRealm(previousRealm);
         }
     }
 
@@ -127,7 +127,7 @@ public class DingTalkSyncAdminResource {
                     "response", result.response()
             ));
         } finally {
-            session.getContext().setRealm(previousRealm);
+            restorePreviousRealm(previousRealm);
         }
     }
 
@@ -159,7 +159,7 @@ public class DingTalkSyncAdminResource {
 
             return syncResultResponse(result, false);
         } finally {
-            session.getContext().setRealm(previousRealm);
+            restorePreviousRealm(previousRealm);
         }
     }
 
@@ -222,6 +222,12 @@ public class DingTalkSyncAdminResource {
                     "usernames", result.usernames()
             ), MediaType.APPLICATION_JSON_TYPE).build();
         } finally {
+            restorePreviousRealm(previousRealm);
+        }
+    }
+
+    private void restorePreviousRealm(RealmModel previousRealm) {
+        if (previousRealm != null) {
             session.getContext().setRealm(previousRealm);
         }
     }
