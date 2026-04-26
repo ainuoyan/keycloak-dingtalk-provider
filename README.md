@@ -2,6 +2,12 @@
 
 为 Keycloak 提供钉钉 OAuth2.0 登录集成，支持独立 JAR 热插拔部署，无需重新编译 Keycloak Docker 镜像。
 
+## 项目来源与致谢
+
+本项目最初基于 [shouqianceshi/keycloak-dingtalk-provider](https://cnb.cool/shouqianceshi/keycloak-dingtalk-provider) 继续改进和维护，在原有钉钉登录 Provider 的基础上，结合实际 Keycloak、AD 域和钉钉通讯录同步场景做了功能扩展、问题修复和文档补充。
+
+感谢原项目作者的开源工作。本仓库保留对原始项目的明确引用，也希望后续改进继续遵循开源协作精神，方便其他有类似 Keycloak + 钉钉集成需求的人复用、审查和继续完善。
+
 ## 功能特性
 
 - 支持钉钉 OAuth2.0 标准登录流程
