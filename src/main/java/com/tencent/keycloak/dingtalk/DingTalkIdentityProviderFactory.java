@@ -58,6 +58,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String BROWSER_SYNC_PREVIEW_URL = "browserSyncPreviewUrl";
     private static final String BROWSER_SYNC_CLEANUP_PREVIEW_URL = "browserSyncCleanupPreviewUrl";
     private static final String ADMIN_SYNC_CLEANUP_EXECUTE_URL = "adminSyncCleanupExecuteUrl";
+    private static final String ADMIN_WEBHOOK_TEST_URL = "adminWebhookTestUrl";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
 
@@ -270,6 +271,13 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS；会删除当前钉钉 IdP 同步创建的用户，需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
                 "/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS");
         properties.add(adminSyncCleanupExecuteUrl);
+
+        ProviderConfigProperty adminWebhookTestUrl = readOnlyUrlProperty(
+                ADMIN_WEBHOOK_TEST_URL,
+                "管理 API Webhook 测试地址",
+                "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}；会发送一条钉钉机器人测试消息，需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
+                "/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}");
+        properties.add(adminWebhookTestUrl);
 
         return properties;
     }

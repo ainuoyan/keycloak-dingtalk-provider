@@ -1,5 +1,7 @@
 package com.tencent.keycloak.dingtalk;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -23,6 +25,7 @@ final class DingTalkWebhookNotifier {
     static final String NOTIFICATION_WEBHOOK_SECRET = "notificationWebhookSecret";
 
     private static final Logger logger = Logger.getLogger(DingTalkWebhookNotifier.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String HMAC_SHA256 = "HmacSHA256";
     private static final int MAX_ITEMS_PER_SECTION = 20;
 
@@ -59,6 +62,24 @@ final class DingTalkWebhookNotifier {
         sendMarkdown(session, idp, title, text);
     }
 
+    static SendResult sendTest(KeycloakSession session, RealmModel realm, IdentityProviderModel idp) {
+        if (!isEnabled(idp)) {
+            return SendResult.failed("webhook_disabled_or_url_missing", "");
+        }
+
+        String title = "Keycloak 钉钉机器人测试";
+        String text = new StringBuilder()
+                .append("## ").append(title).append("\n")
+                .append("- Realm: ").append(realm.getName()).append("\n")
+                .append("- IdP: ").append(idp.getAlias()).append("\n")
+                .append("- Time: ")
+                .append(DingTalkUserSyncTask.formatBeijingTime(System.currentTimeMillis() / 1000))
+                .append("\n")
+                .append("- Result: Webhook 配置可用")
+                .toString();
+        return sendMarkdown(session, idp, title, text);
+    }
+
     static boolean isEnabled(IdentityProviderModel idp) {
         return idp != null && isEnabled(idp.getConfig());
     }
@@ -69,7 +90,8 @@ final class DingTalkWebhookNotifier {
                 && StringUtils.isNotBlank(config.get(NOTIFICATION_WEBHOOK_URL));
     }
 
-    private static void sendMarkdown(KeycloakSession session, IdentityProviderModel idp, String title, String text) {
+    private static SendResult sendMarkdown(KeycloakSession session, IdentityProviderModel idp,
+                                           String title, String text) {
         String webhookUrl = idp.getConfig().get(NOTIFICATION_WEBHOOK_URL);
         String secret = idp.getConfig().get(NOTIFICATION_WEBHOOK_SECRET);
         String targetUrl = signedWebhookUrl(webhookUrl, secret);
@@ -84,11 +106,37 @@ final class DingTalkWebhookNotifier {
                     .header("Content-Type", "application/json")
                     .json(body)
                     .asString();
+            SendResult result = parseRobotResponse(response);
+            if (!result.success()) {
+                logger.warnf("DingTalk webhook notification rejected. idp=%s, response=%s",
+                        idp.getAlias(), DingTalkIdentityProvider.sanitizeForLog(response));
+                return result;
+            }
             logger.debugf("DingTalk webhook notification response: %s",
                     DingTalkIdentityProvider.sanitizeForLog(response));
+            return result;
         } catch (Exception e) {
             logger.warnf(e, "Failed to send DingTalk webhook notification. idp=%s, webhook=%s",
                     idp.getAlias(), DingTalkIdentityProvider.sanitizeUriForLog(targetUrl));
+            return SendResult.failed("send_failed: " + e.getClass().getSimpleName(), "");
+        }
+    }
+
+    static SendResult parseRobotResponse(String response) {
+        if (StringUtils.isBlank(response)) {
+            return SendResult.success("");
+        }
+
+        try {
+            JsonNode json = MAPPER.readTree(response);
+            if (json.has("errcode") && json.path("errcode").asInt() != 0) {
+                String error = "dingtalk_error: " + json.path("errcode").asInt()
+                        + " " + json.path("errmsg").asText("");
+                return SendResult.failed(sanitizeLine(error), DingTalkIdentityProvider.sanitizeForLog(response));
+            }
+            return SendResult.success(DingTalkIdentityProvider.sanitizeForLog(response));
+        } catch (Exception ignored) {
+            return SendResult.success(DingTalkIdentityProvider.sanitizeForLog(response));
         }
     }
 
@@ -110,6 +158,20 @@ final class DingTalkWebhookNotifier {
         } catch (Exception e) {
             logger.warn("Failed to sign DingTalk webhook URL, sending unsigned notification", e);
             return webhookUrl;
+        }
+    }
+
+    private static String sanitizeLine(String value) {
+        return StringUtils.defaultString(value).replace('\n', ' ').replace('\r', ' ');
+    }
+
+    record SendResult(boolean success, String error, String response) {
+        static SendResult success(String response) {
+            return new SendResult(true, "", StringUtils.defaultString(response));
+        }
+
+        static SendResult failed(String error, String response) {
+            return new SendResult(false, StringUtils.defaultString(error), StringUtils.defaultString(response));
         }
     }
 
@@ -146,16 +208,17 @@ final class DingTalkWebhookNotifier {
             if (!enabled) {
                 return;
             }
-            createdUsers.add("username=" + sanitizeLine(username) + ", dingtalkUser=" + sanitizeLine(dingtalkUser));
+            createdUsers.add("username=" + DingTalkWebhookNotifier.sanitizeLine(username)
+                    + ", dingtalkUser=" + DingTalkWebhookNotifier.sanitizeLine(dingtalkUser));
         }
 
         void addSkippedCreate(String username, String reason, String dingtalkUser) {
             if (!enabled) {
                 return;
             }
-            skippedCreates.add("username=" + sanitizeLine(username)
-                    + ", reason=" + sanitizeLine(reason)
-                    + ", dingtalkUser=" + sanitizeLine(dingtalkUser));
+            skippedCreates.add("username=" + DingTalkWebhookNotifier.sanitizeLine(username)
+                    + ", reason=" + DingTalkWebhookNotifier.sanitizeLine(reason)
+                    + ", dingtalkUser=" + DingTalkWebhookNotifier.sanitizeLine(dingtalkUser));
         }
 
         void flush() {
@@ -191,8 +254,5 @@ final class DingTalkWebhookNotifier {
             }
         }
 
-        private static String sanitizeLine(String value) {
-            return StringUtils.defaultString(value).replace('\n', ' ').replace('\r', ' ');
-        }
     }
 }

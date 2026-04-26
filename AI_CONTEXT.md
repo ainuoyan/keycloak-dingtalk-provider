@@ -129,9 +129,11 @@
 - 登录链路新创建 Keycloak 用户。
 - 同步真实执行中新创建 Keycloak 用户。
 - 同步真实执行中，因生成 username 为空或 username 已存在但无可信匹配而跳过创建的 WARN。
+- 管理端 `POST /test-webhook?alias={alias}` 可发送一条测试消息，便于验证 Webhook、关键词和加签配置。
 
 关键边界：
 
+- Webhook 测试接口必须要求 `manage-users` 权限。
 - dry-run 不发送通知。
 - 发送失败不能中断登录或同步，只能记录 WARN。
 - 通知内容必须脱敏，不输出手机号、邮箱、token、secret、Webhook access_token 或加签密钥。
@@ -156,6 +158,7 @@
 | `GET /debug?alias={alias}` | dry-run 同步预览 | 需要 GET 调试开关 |
 | `GET /cleanup-sync-created-users?alias={alias}` | dry-run 清理预览 | 需要 GET 调试开关 |
 | `POST /cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS` | 删除同步创建用户 | 不需要 GET 调试开关 |
+| `POST /test-webhook?alias={alias}` | 发送钉钉机器人测试消息 | 不需要 GET 调试开关 |
 
 ### 浏览器公开入口
 
@@ -175,6 +178,7 @@
 - 浏览器同步预览地址
 - 浏览器清理同步创建用户预览地址
 - 管理 API 清理同步创建用户执行地址
+- 管理 API Webhook 测试地址
 
 ## 同步结果语义
 
@@ -258,6 +262,7 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncCreatedUserCleanup
 - 任一部门拉取失败时，离职禁用是否会被跳过。
 - 日志是否泄露手机号、邮箱、token、secret、OAuth code、state。
 - 钉钉机器人通知是否只在真实执行时发送，是否脱敏，发送失败是否不会中断主流程。
+- 钉钉机器人测试接口是否必须是管理端 POST，并且要求 `manage-users` 权限。
 - README 中的 URL、确认口令、权限说明是否和代码一致。
 - `dist` JAR 是否和当前源码构建结果一致。
 

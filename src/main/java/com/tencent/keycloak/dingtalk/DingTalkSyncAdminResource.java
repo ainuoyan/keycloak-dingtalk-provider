@@ -86,6 +86,51 @@ public class DingTalkSyncAdminResource {
         return cleanupSyncCreatedUsers(alias, confirm, true);
     }
 
+    @POST
+    @Path("test-webhook")
+    public Response testWebhook(@QueryParam("alias") String alias) {
+        auth.users().requireManage();
+        if (StringUtils.isBlank(alias)) {
+            return json(Response.Status.BAD_REQUEST, Map.of("error", "alias_required"));
+        }
+
+        RealmModel previousRealm = session.getContext().getRealm();
+        try {
+            session.getContext().setRealm(realm);
+            IdentityProviderModel idp = getDingTalkProvider(alias);
+            if (idp == null) {
+                return json(Response.Status.NOT_FOUND, Map.of("error", "dingtalk_idp_not_found", "alias", alias));
+            }
+            if (!DingTalkWebhookNotifier.isEnabled(idp)) {
+                return json(Response.Status.BAD_REQUEST, Map.of(
+                        "error", "webhook_disabled_or_url_missing",
+                        "alias", alias
+                ));
+            }
+
+            DingTalkWebhookNotifier.SendResult result =
+                    DingTalkWebhookNotifier.sendTest(session, realm, idp);
+
+            adminEvent.operation(OperationType.ACTION)
+                    .resource(DingTalkSyncAdminResourceProviderFactory.PROVIDER_ID + "/test-webhook")
+                    .detail("alias", alias)
+                    .detail("success", String.valueOf(result.success()))
+                    .success();
+
+            Response.Status status = result.success()
+                    ? Response.Status.OK
+                    : Response.Status.BAD_GATEWAY;
+            return json(status, Map.of(
+                    "alias", alias,
+                    "success", result.success(),
+                    "error", result.error(),
+                    "response", result.response()
+            ));
+        } finally {
+            session.getContext().setRealm(previousRealm);
+        }
+    }
+
     private Response runSync(String alias, boolean requireConfirm, String confirm, boolean getRequest) throws Exception {
         auth.users().requireManage();
         if (getRequest) {

@@ -154,6 +154,7 @@ services:
 | 浏览器同步预览地址 | 只读提示项，显示纯浏览器 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}`；需要开启 GET 同步调试入口并填写正确调试密钥 |
 | 浏览器清理同步创建用户预览地址 | 只读提示项，显示纯浏览器 GET 清理预览路径 `/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}`；只返回 dry-run 名单，不删除用户 |
 | 管理 API 清理同步创建用户执行地址 | 只读提示项，显示管理 API POST 清理路径 `/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS`；会删除当前钉钉 IdP 同步创建的用户，需要管理端 token 和 `manage-users` 权限 |
+| 管理 API Webhook 测试地址 | 只读提示项，显示管理 API POST Webhook 测试路径 `/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}`；会发送一条测试消息，需要管理端 token 和 `manage-users` 权限 |
 
 > `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 
@@ -328,6 +329,27 @@ curl -X POST \
 - Webhook 未启用或地址为空。
 
 通知内容只包含 realm、IdP alias、Keycloak username、脱敏后的钉钉标识，以及手机号/邮箱是否存在，不包含手机号、邮箱、access token、client secret、Webhook token 或加签密钥明文。Webhook 发送失败不会中断登录或同步流程，只会在 Keycloak 日志里记录 WARN。
+
+配置完成后，可以用管理端测试接口发送一条测试消息。该接口是 `POST`，需要 `Authorization: Bearer <admin-access-token>` 和当前 realm 的 `manage-users` 权限；它不受“启用 GET 同步调试入口”影响。
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <admin-access-token>" \
+  "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={idpAlias}"
+```
+
+成功时返回：
+
+```json
+{
+  "alias": "dingtalk",
+  "success": true,
+  "error": "",
+  "response": "{\"errcode\":0,\"errmsg\":\"ok\"}"
+}
+```
+
+如果钉钉机器人因为关键词、安全设置或签名问题拒绝消息，接口会返回 `success=false` 和钉钉返回的错误摘要。若机器人开启“关键词”安全设置，请确保关键词包含在测试消息中，例如 `Keycloak` 或 `钉钉`。
 
 5. 保存后，复制生成的「Redirect URI」：
    ```

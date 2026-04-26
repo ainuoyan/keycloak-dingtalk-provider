@@ -271,4 +271,27 @@ class DingTalkIdentityProviderTest {
         assertEquals("2026-04-26 00:06:23 CST",
                 DingTalkUserSyncTask.formatBeijingTime(1777133183));
     }
+
+    @Test
+    void webhookSigningAndRobotResponseParsingAreSafe() {
+        assertEquals("https://oapi.dingtalk.com/robot/send?access_token=token",
+                DingTalkWebhookNotifier.signedWebhookUrl(
+                        "https://oapi.dingtalk.com/robot/send?access_token=token", ""));
+
+        String signedUrl = DingTalkWebhookNotifier.signedWebhookUrl(
+                "https://oapi.dingtalk.com/robot/send?access_token=token", "secret");
+        assertTrue(signedUrl.startsWith(
+                "https://oapi.dingtalk.com/robot/send?access_token=token&timestamp="));
+        assertTrue(signedUrl.contains("&sign="));
+
+        DingTalkWebhookNotifier.SendResult success =
+                DingTalkWebhookNotifier.parseRobotResponse("{\"errcode\":0,\"errmsg\":\"ok\"}");
+        assertTrue(success.success());
+
+        DingTalkWebhookNotifier.SendResult failure =
+                DingTalkWebhookNotifier.parseRobotResponse("{\"errcode\":310000,\"errmsg\":\"keywords not in content\"}");
+        assertFalse(failure.success());
+        assertTrue(failure.error().contains("310000"));
+        assertTrue(failure.response().contains("\"errmsg\":\"keywords not in content\""));
+    }
 }
