@@ -128,7 +128,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(DingTalkUserSyncTask.PERIODIC_SYNC_ENABLED)
                 .label("启用定期同步钉钉通讯录")
-                .helpText("开启后 Keycloak 会定期读取钉钉通讯录，按 userId、邮箱、手机号匹配已有用户并绑定钉钉身份；默认关闭")
+                .helpText("开启后 Keycloak 会定期读取钉钉通讯录，先按已绑定钉钉身份定位，再按配置的 phone、email、unionId、openId、username 规则匹配已有用户并绑定钉钉身份；默认关闭")
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(false)
                 .add()
@@ -188,7 +188,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(BROWSER_SYNC_DEBUG_KEY)
                 .label("浏览器同步调试密钥")
-                .helpText("填写后启用纯浏览器 GET 调试入口。建议使用随机长字符串，仅测试期启用；为空时浏览器调试入口不可用")
+                .helpText("填写后启用纯浏览器 GET 预览入口。该入口只拉取钉钉并返回 dry-run 统计，不写入 Keycloak；真实同步请使用管理端 POST")
                 .type(ProviderConfigProperty.PASSWORD)
                 .secret(true)
                 .add()
@@ -197,7 +197,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
         ProviderConfigProperty manualSyncUrl = new ProviderConfigProperty(
                 MANUAL_SYNC_URL,
                 "管理端同步调试地址",
-                "管理 API 调试可访问 GET/POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；需要 Admin Bearer Token 或已登录管理台且具备 manage-users 权限，不能作为无认证浏览器直开入口。",
+                "管理 API 调试只支持 POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；需要 Admin Bearer Token 且具备 manage-users 权限。",
                 ProviderConfigProperty.STRING_TYPE,
                 "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}");
         manualSyncUrl.setReadOnly(true);
@@ -205,8 +205,8 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
         ProviderConfigProperty browserSyncDebugUrl = new ProviderConfigProperty(
                 BROWSER_SYNC_DEBUG_URL,
-                "浏览器同步调试地址",
-                "纯浏览器调试可访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；仅在配置了“浏览器同步调试密钥”后可用。",
+                "浏览器同步预览地址",
+                "纯浏览器预览可访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；返回 dry-run 统计，不创建、更新、禁用用户。",
                 ProviderConfigProperty.STRING_TYPE,
                 "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}");
         browserSyncDebugUrl.setReadOnly(true);

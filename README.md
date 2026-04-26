@@ -142,9 +142,9 @@ services:
 | 定期同步禁用离职用户 | 默认关闭，开启后只禁用之前由当前钉钉同步任务标记为托管、但本次通讯录不存在的 Keycloak 用户 |
 | 定期同步重新启用返聘用户 | 默认开启，离职用户重新出现在钉钉通讯录时自动启用 |
 | 记录同步明细日志 | 默认关闭；开启后定时同步会记录每个钉钉用户的匹配来源、Keycloak 用户名、更新字段和跳过原因。手动同步会自动记录明细 |
-| 浏览器同步调试密钥 | 默认空，填写后启用纯浏览器 GET 调试入口。建议仅测试期启用随机长字符串 |
-| 管理端同步调试地址 | 只读提示项，显示管理 API 调试路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}`，需要管理权限 |
-| 浏览器同步调试地址 | 只读提示项，显示 GET 调试路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}` |
+| 浏览器同步调试密钥 | 默认空，填写后启用纯浏览器 GET 预览入口。该入口只返回 dry-run 统计，不写入 Keycloak |
+| 管理端同步调试地址 | 只读提示项，显示管理 API 调试路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}`，真实同步只支持 POST 且需要管理权限 |
+| 浏览器同步预览地址 | 只读提示项，显示 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}` |
 
 > `登录后是否更新用户信息` 只控制 Provider 是否写回用户属性。它不会关闭 Keycloak 首次第三方登录流程里的 **Review Profile / Update Profile** 页面；如果 AD 用户已经同步完成，只希望钉钉按用户名或邮箱绑定已有用户，请复制 `first broker login` flow，禁用或删除其中的 `Review Profile` 执行项，然后在钉钉 Identity Provider 的 **First Login Flow** 里选择这个副本。
 
@@ -168,7 +168,7 @@ AD 已同步用户的推荐配置：
 1. 把“定期同步部门ID”视为根部门；开启“同步子部门用户”时，递归获取所有下级部门 ID。
 2. 逐个部门拉取用户，并按钉钉外部 ID 去重，避免同一用户在多个部门里重复处理。
 3. 先查是否已经绑定当前钉钉 Identity Provider。
-4. 未绑定时，按“匹配规则配置”的顺序匹配已有 Keycloak 用户，例如 `phone,email` 会先查手机号，再查邮箱。
+4. 未绑定时，按“匹配规则配置”的顺序匹配已有 Keycloak 用户，例如 `phone,email` 会先查手机号，再查邮箱；同一手机号、邮箱或候选用户名匹配到多个用户时会拒绝绑定并记录 WARN，避免错绑。
 5. 匹配成功后补充钉钉 federated identity 绑定，并标记为当前钉钉 IDP 托管用户。
 6. 匹配失败且开启“定期同步自动创建用户”时，按姓名拼音规则创建 Keycloak 用户，并绑定钉钉身份。
 7. 按“定期同步字段”和“定期同步覆盖已有字段”更新 `phoneNumber`、`email`；同时始终记录 `nickname`、`dingtalk_userid`、`dingtalk_last_sync_at` 等钉钉身份和排障属性。
@@ -191,7 +191,7 @@ AD 已同步用户的推荐配置：
 
 ### 手动触发钉钉同步
 
-插件提供了一个管理端手动同步入口，方便测试和排障：
+插件提供了一个管理端手动同步入口，方便测试和排障。真实同步只支持 POST：
 
 ```bash
 curl -X POST \
@@ -199,21 +199,15 @@ curl -X POST \
   "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}"
 ```
 
-为了浏览器调试方便，同一路径也支持 GET。已登录 Keycloak 管理台且具备权限时，可以直接访问：
-
-```text
-https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}
-```
-
 要求调用者具备当前 realm 的 `manage-users` 权限。`alias` 是钉钉 Identity Provider 的别名；如果不传 `alias`，会同步当前 realm 下所有启用的钉钉 Identity Provider。
 
-如果需要不带 Admin Bearer Token、直接在浏览器地址栏触发同步，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
+如果需要不带 Admin Bearer Token、直接在浏览器地址栏查看钉钉通讯录同步预览，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}&key={浏览器同步调试密钥}
 ```
 
-这个浏览器入口要求 `alias` 和密钥都正确；密钥为空时入口禁用。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后清空。
+这个浏览器入口要求 `alias` 和密钥都正确；密钥为空时入口禁用。它会调用钉钉接口并返回 `dryRun=true` 的统计和明细日志，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后清空。
 
 如需清理早期错误同步产生的纯数字 username 用户，可以使用受同一调试密钥保护的一次性入口。它只会匹配同时满足以下条件的用户：当前钉钉 IDP 托管、已绑定当前钉钉 IDP、username 全数字，并且是同步创建用户或旧版 username 等于 `dingtalk_userid` 的用户。
 
@@ -230,7 +224,7 @@ curl -X POST \
   "https://your-keycloak-domain/realms/{realm}/dingtalk-sync/cleanup-numeric-users?alias={idpAlias}&key={浏览器同步调试密钥}&confirm=DELETE_NUMERIC_DINGTALK_USERS"
 ```
 
-删除后再次访问浏览器同步调试地址，会按姓名拼音规则重新创建用户，或按手机号、邮箱等规则绑定已有用户。
+删除后用管理端 POST 手动同步或等待定时同步，会按姓名拼音规则重新创建用户，或按手机号、邮箱等规则绑定已有用户。浏览器预览地址只做 dry-run，不会重新创建用户。
 
 接口返回本次同步统计，例如：
 
@@ -322,7 +316,7 @@ curl -X POST \
 | 钉钉字段 | Keycloak 属性 | 处理逻辑 |
 |---------|--------------|---------|
 | `unionId` | 用户唯一ID | 优先使用，跨应用唯一 |
-| `userId` | `dingtalk_userid` | 企业通讯录 userId，始终写入用户属性；仅在配置 `username` 匹配规则时作为兼容候选之一，不用于新用户 username 生成 |
+| `userId` | `dingtalk_userid` | 企业通讯录 userId，始终写入用户属性；不参与 username 生成，也不作为 `username` 匹配候选 |
 | `openId` | `dingtalk_openid` | 应用内唯一标识 |
 | `corpId` | `dingtalk_corpid` | 用于定位企业角色后缀 |
 | `nick` | `nickname` | 用户昵称 |
@@ -336,9 +330,9 @@ curl -X POST \
 1. 先把钉钉姓名转换为拼音，例如 `张三` → `zhangsan`。
 2. 如果钉钉邮箱存在，且邮箱前缀与姓名拼音一致，例如 `zhangsan@rzon.tech`，则使用邮箱前缀 `zhangsan`。
 3. 其他情况下优先使用姓名拼音作为 username。
-4. 如果姓名无法转换出拼音，再依次回退到邮箱前缀、钉钉 `userId`、`unionId`。
+4. 如果姓名无法转换出拼音，则回退到邮箱前缀；如果姓名和邮箱都不可用，本轮不会自动创建用户，会记录 WARN 方便补齐钉钉资料。
 
-`dingtalk_userid` 会始终写入用户属性，方便排障和后续同步定位。它不再作为新用户 username 的优先来源。
+`dingtalk_userid` 会始终写入用户属性，方便排障和后续同步定位。它不会作为新用户 username，也不会作为 `username` 匹配规则的候选值。
 
 如果生成出的 username 已存在，但该钉钉用户没有通过已绑定身份、手机号或邮箱等可信规则匹配到这个用户，定时同步会跳过创建并输出 WARN，避免同名拼音导致绑错账号。
 

@@ -10,12 +10,13 @@
     <packaging>jar</packaging>
 
     <name>Keycloak DingTalk Provider</name>
-    <description>钉钉登录集成Provider - 独立JAR部署，无外部依赖</description>
+    <description>钉钉登录集成Provider - 独立JAR部署，内置必要第三方依赖</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.build.outputTimestamp>2026-04-26T00:00:00Z</project.build.outputTimestamp>
         <keycloak.version>26.6.1</keycloak.version>
         <junit.jupiter.version>5.10.3</junit.jupiter.version>
     </properties>

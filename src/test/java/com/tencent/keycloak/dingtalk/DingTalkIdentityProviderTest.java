@@ -155,6 +155,11 @@ class DingTalkIdentityProviderTest {
         noChineseName.setEmail("fallback@rzon.tech");
         noChineseName.setUserId("998877");
         assertEquals("fallback", DingTalkUserSyncTask.resolveProvisionedUsername(noChineseName));
+
+        UserDto noNameOrEmail = new UserDto();
+        noNameOrEmail.setUserId("998877");
+        noNameOrEmail.setUnionId("union-998877");
+        assertNull(DingTalkUserSyncTask.resolveProvisionedUsername(noNameOrEmail));
     }
 
     @Test

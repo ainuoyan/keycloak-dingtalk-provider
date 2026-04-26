@@ -63,24 +63,25 @@ public class DingTalkSyncBrowserResource {
         try {
             session.getContext().setRealm(realm);
             DingTalkUserSyncTask.SyncResult result = new DingTalkUserSyncTask()
-                    .syncProviderNow(session, realm, alias);
-            return Response.ok(Map.of(
-                    "alias", result.alias(),
-                    "listed", result.listed(),
-                    "matched", result.matched(),
-                    "created", result.created(),
-                    "linked", result.linked(),
-                    "updated", result.updated(),
-                    "reenabled", result.reenabled(),
-                    "disabled", result.disabled(),
-                    "skipped", result.skipped(),
-                    "reason", result.reason() == null ? "" : result.reason()
+                    .previewProviderNow(session, realm, alias);
+            return Response.ok(Map.ofEntries(
+                    Map.entry("alias", result.alias()),
+                    Map.entry("dryRun", true),
+                    Map.entry("listed", result.listed()),
+                    Map.entry("matched", result.matched()),
+                    Map.entry("created", result.created()),
+                    Map.entry("linked", result.linked()),
+                    Map.entry("updated", result.updated()),
+                    Map.entry("reenabled", result.reenabled()),
+                    Map.entry("disabled", result.disabled()),
+                    Map.entry("skipped", result.skipped()),
+                    Map.entry("reason", result.reason() == null ? "" : result.reason())
             ), MediaType.APPLICATION_JSON_TYPE).build();
         } catch (Exception e) {
-            logger.errorf(e, "DingTalk browser sync debug failed. realm=%s, idp=%s",
+            logger.errorf(e, "DingTalk browser sync preview failed. realm=%s, idp=%s",
                     realm.getName(), alias);
             return json(Response.Status.INTERNAL_SERVER_ERROR,
-                    Map.of("error", "sync_failed", "alias", alias, "message", StringUtils.defaultString(e.getMessage())));
+                    Map.of("error", "sync_preview_failed", "alias", alias, "message", StringUtils.defaultString(e.getMessage())));
         } finally {
             session.getContext().setRealm(previousRealm);
         }

@@ -21,6 +21,7 @@ import com.alibaba.fastjson2.JSON;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -331,7 +332,7 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
     }
 
     /**
-     * 重写 importNewUser 方法，确保新用户首次登录时也能获得角色
+     * 重写 importNewUser 方法，确保新用户首次登录时写入钉钉身份属性，并按配置授予企业角色。
      */
     @Override
     public void importNewUser(KeycloakSession session, RealmModel realm, UserModel user,
@@ -354,10 +355,10 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
             user.setSingleAttribute(PHONE_NUMBER, phoneNumber);
         }
         
-        // 分配当前企业对应的 ent-member 和 ent-plugin-enabled 角色
+        // 按配置分配当前企业对应的 ent-member 和 ent-plugin-enabled 角色
         grantEnterpriseRoles(realm, user, context);
         
-        logger.infof("Successfully imported new DingTalk user with roles: %s", user.getUsername());
+        logger.infof("Successfully imported new DingTalk user: %s", user.getUsername());
     }
 
     @Override
@@ -737,28 +738,23 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
                 if (StringUtils.isBlank(context.getEmail())) {
                     return Optional.empty();
                 }
-                return Optional.ofNullable(session.users().getUserByEmail(realm, context.getEmail()));
+                return findUniqueByEmail(session, realm, context.getEmail(), "login");
             case "phone":
                 String phoneNumber = context.getUserAttribute(PHONE_NUMBER);
                 for (String attributeName : PHONE_ATTRIBUTE_NAMES) {
-                    Optional<UserModel> matched = findFirstByAttribute(session, realm, attributeName, phoneNumber);
+                    Optional<UserModel> matched = findUniqueByAttribute(
+                            session, realm, attributeName, phoneNumber, "login phone");
                     if (matched.isPresent()) {
                         return matched;
                     }
                 }
                 return Optional.empty();
             case "unionid":
-                return findFirstByAttribute(session, realm, UNION_ID, context.getUserAttribute(UNION_ID));
+                return findUniqueByAttribute(session, realm, UNION_ID, context.getUserAttribute(UNION_ID), "login unionid");
             case "openid":
-                return findFirstByAttribute(session, realm, OPEN_ID, context.getUserAttribute(OPEN_ID));
+                return findUniqueByAttribute(session, realm, OPEN_ID, context.getUserAttribute(OPEN_ID), "login openid");
             case "username":
-                for (String username : getUsernameCandidates(context)) {
-                    UserModel matched = session.users().getUserByUsername(realm, username);
-                    if (matched != null) {
-                        return Optional.of(matched);
-                    }
-                }
-                return Optional.empty();
+                return findUniqueByUsernameCandidates(session, realm, getUsernameCandidates(context), "login username");
             default:
                 logger.warnf("Unsupported DingTalk match rule: %s", rule);
                 return Optional.empty();
@@ -776,7 +772,6 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         }
 
         return Arrays.asList(
-                        context.getUserAttribute(DINGTALK_USER_ID),
                         emailPrefix,
                         context.getModelUsername())
                 .stream()
@@ -786,14 +781,62 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
                 .toList();
     }
 
-    private Optional<UserModel> findFirstByAttribute(KeycloakSession session, RealmModel realm,
-                                                    String attributeName, String attributeValue) {
+    private Optional<UserModel> findUniqueByEmail(KeycloakSession session, RealmModel realm,
+                                                  String email, String source) {
+        if (StringUtils.isBlank(email)) {
+            return Optional.empty();
+        }
+
+        List<UserModel> matches = session.users()
+                .searchForUserStream(realm, Map.of(UserModel.EMAIL, email), 0, 2)
+                .filter(user -> email.equalsIgnoreCase(user.getEmail()))
+                .limit(2)
+                .toList();
+        if (matches.isEmpty()) {
+            UserModel matched = session.users().getUserByEmail(realm, email);
+            return Optional.ofNullable(matched);
+        }
+        return uniqueMatch(matches, source + " email", email);
+    }
+
+    private Optional<UserModel> findUniqueByAttribute(KeycloakSession session, RealmModel realm,
+                                                     String attributeName, String attributeValue,
+                                                     String source) {
         if (StringUtils.isBlank(attributeValue)) {
             return Optional.empty();
         }
-        return session.users()
+        List<UserModel> matches = session.users()
                 .searchForUserByUserAttributeStream(realm, attributeName, attributeValue)
-                .findFirst();
+                .limit(2)
+                .toList();
+        return uniqueMatch(matches, source + " attribute=" + attributeName, attributeValue);
+    }
+
+    private Optional<UserModel> findUniqueByUsernameCandidates(KeycloakSession session, RealmModel realm,
+                                                               List<String> usernames, String source) {
+        List<UserModel> matches = new ArrayList<>();
+        for (String username : usernames) {
+            UserModel matched = session.users().getUserByUsername(realm, username);
+            if (matched != null && matches.stream().noneMatch(existing -> existing.getId().equals(matched.getId()))) {
+                matches.add(matched);
+                if (matches.size() > 1) {
+                    break;
+                }
+            }
+        }
+        return uniqueMatch(matches, source, usernames);
+    }
+
+    private Optional<UserModel> uniqueMatch(List<UserModel> matches, String source, Object valueForLog) {
+        if (matches.isEmpty()) {
+            return Optional.empty();
+        }
+        if (matches.size() > 1) {
+            logger.warnf("Skip DingTalk user match by %s: multiple Keycloak users matched value=%s",
+                    source, valueForLog);
+            return Optional.empty();
+        }
+        return Optional.of(matches.get(0));
     }
 
     static List<String> parseMatchRules(String rawRules) {

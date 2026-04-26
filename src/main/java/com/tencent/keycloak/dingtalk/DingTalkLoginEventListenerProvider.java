@@ -10,6 +10,7 @@ import org.keycloak.events.Event;
 import org.keycloak.events.EventListenerProvider;
 import org.keycloak.events.EventType;
 import org.keycloak.events.admin.AdminEvent;
+import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
@@ -17,7 +18,7 @@ import org.keycloak.models.UserModel;
 
 /**
  * 钉钉登录事件监听器
- * 在钉钉用户登录后自动分配 ent-plugin-enabled 角色
+ * 在明确启用企业角色授予时，为历史钉钉用户补齐 ent-plugin-enabled 角色。
  */
 public class DingTalkLoginEventListenerProvider implements EventListenerProvider {
 
@@ -26,6 +27,8 @@ public class DingTalkLoginEventListenerProvider implements EventListenerProvider
     private static final String ROLE_PLUGIN_ENABLE = "ent-plugin-enabled:";
     private static final String DINGTALK_PROVIDER_ID = "dingtalk";
     private static final String ENT_USER_SOURCE_PREFIX = "ent-user-source:";
+    private static final String ENTERPRISE_ID = "enterpriseId";
+    private static final String CORP_ID = "dingtalk_corpid";
 
     private final KeycloakSession session;
 
@@ -68,6 +71,11 @@ public class DingTalkLoginEventListenerProvider implements EventListenerProvider
      */
     private void grantPluginEnabledRole(RealmModel realm, UserModel user, Set<String> enterpriseIds) {
         enterpriseIds.forEach(enterpriseId -> {
+            if (!isEnterpriseRoleGrantEnabled(realm, user, enterpriseId)) {
+                logger.debugf("DingTalk EventListener: enterprise role grant disabled, skip user %s enterprise %s",
+                        user.getUsername(), enterpriseId);
+                return;
+            }
             String roleName = ROLE_PLUGIN_ENABLE + enterpriseId;
             RoleModel role = realm.getRole(roleName);
             if (role == null) {
@@ -81,6 +89,22 @@ public class DingTalkLoginEventListenerProvider implements EventListenerProvider
                         role.getName(), user.getUsername());
             }
         });
+    }
+
+    private boolean isEnterpriseRoleGrantEnabled(RealmModel realm, UserModel user, String enterpriseId) {
+        return realm.getIdentityProvidersStream()
+                .filter(provider -> DINGTALK_PROVIDER_ID.equals(provider.getProviderId()))
+                .filter(IdentityProviderModel::isEnabled)
+                .filter(provider -> DingTalkIdentityProvider.isEnterpriseRoleGrantEnabled(provider.getConfig()))
+                .anyMatch(provider -> isProviderForEnterprise(provider, user, enterpriseId));
+    }
+
+    private boolean isProviderForEnterprise(IdentityProviderModel provider, UserModel user, String enterpriseId) {
+        String configuredEnterpriseId = provider.getConfig() == null ? null : provider.getConfig().get(ENTERPRISE_ID);
+        if (configuredEnterpriseId != null && !configuredEnterpriseId.isBlank()) {
+            return enterpriseId.equals(configuredEnterpriseId.trim());
+        }
+        return enterpriseId.equals(user.getFirstAttribute(CORP_ID));
     }
 
     static Set<String> findDingTalkEnterpriseIds(Map<String, List<String>> attributes) {

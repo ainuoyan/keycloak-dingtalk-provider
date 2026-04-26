@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -128,13 +129,36 @@ public class DingTalkUserSyncTask implements ScheduledTask {
 
         SyncResult total = SyncResult.empty(StringUtils.defaultIfBlank(alias, "*"));
         for (IdentityProviderModel idp : providers) {
-            total = total.plus(syncProvider(session, realm, idp, true));
+            total = total.plus(syncProvider(session, realm, idp, true, false));
+        }
+        return total;
+    }
+
+    SyncResult previewProviderNow(KeycloakSession session, RealmModel realm, String alias) throws Exception {
+        List<IdentityProviderModel> providers = realm.getIdentityProvidersStream()
+                .filter(idp -> PROVIDER_ID.equals(idp.getProviderId()))
+                .filter(IdentityProviderModel::isEnabled)
+                .filter(idp -> StringUtils.isBlank(alias) || alias.equals(idp.getAlias()))
+                .toList();
+
+        if (providers.isEmpty()) {
+            throw new IllegalArgumentException("No enabled DingTalk identity provider matched alias: " + alias);
+        }
+
+        SyncResult total = SyncResult.empty(StringUtils.defaultIfBlank(alias, "*"));
+        for (IdentityProviderModel idp : providers) {
+            total = total.plus(syncProvider(session, realm, idp, true, true));
         }
         return total;
     }
 
     private SyncResult syncProvider(KeycloakSession session, RealmModel realm,
                                     IdentityProviderModel idp, boolean force) throws Exception {
+        return syncProvider(session, realm, idp, force, false);
+    }
+
+    private SyncResult syncProvider(KeycloakSession session, RealmModel realm,
+                                    IdentityProviderModel idp, boolean force, boolean dryRun) throws Exception {
         Map<String, String> config = idp.getConfig();
         if (!force && !isPeriodicSyncEnabled(config)) {
             return SyncResult.skipped(idp.getAlias(), "periodic sync disabled");
@@ -171,8 +195,8 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         }
 
         if (detailedLog) {
-            logger.infof("DingTalk sync detail started. realm=%s, idp=%s, mode=%s, departments=%s, includeChildDepartments=%s, matchRules=%s, syncFields=%s, createUsers=%s, disableMissingUsers=%s, overwriteExisting=%s",
-                    realm.getName(), idp.getAlias(), force ? "manual" : "periodic",
+            logger.infof("DingTalk sync detail started. realm=%s, idp=%s, mode=%s, dryRun=%s, departments=%s, includeChildDepartments=%s, matchRules=%s, syncFields=%s, createUsers=%s, disableMissingUsers=%s, overwriteExisting=%s",
+                    realm.getName(), idp.getAlias(), force ? "manual" : "periodic", dryRun,
                     parseDepartmentIds(config.get(PERIODIC_SYNC_DEPARTMENT_IDS)), includeChildDepartments,
                     matchRules, syncFields, createUsers, disableMissingUsers, overwriteExisting);
         }
@@ -230,6 +254,28 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                 UserModel user = matchResult.user();
                 String matchSource = matchResult.source();
                 if (user == null) {
+                    if (dryRun && createUsers) {
+                        String provisionedUsername = resolveProvisionedUsername(dingtalkUser);
+                        UserModel existing = StringUtils.isBlank(provisionedUsername)
+                                ? null
+                                : session.users().getUserByUsername(realm, provisionedUsername);
+                        if (StringUtils.isBlank(provisionedUsername) || existing != null) {
+                            if (detailedLog) {
+                                logger.infof("DingTalk sync detail would skip creating user. realm=%s, idp=%s, dingtalkUser=%s, username=%s, reason=%s",
+                                        realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
+                                        provisionedUsername,
+                                        StringUtils.isBlank(provisionedUsername) ? "username is empty" : "username already exists");
+                            }
+                            continue;
+                        }
+                        created++;
+                        if (detailedLog) {
+                            logger.infof("DingTalk sync detail would create user. realm=%s, idp=%s, dingtalkUser=%s, username=%s",
+                                    realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
+                                    provisionedUsername);
+                        }
+                        continue;
+                    }
                     Optional<ProvisionResult> provisionResult = createUsers
                             ? createUser(session, realm, idp, dingtalkUser)
                             : Optional.empty();
@@ -252,6 +298,9 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                     logger.infof("DingTalk sync detail matched user. realm=%s, idp=%s, dingtalkUser=%s, keycloakUsername=%s, source=%s",
                             realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
                             user.getUsername(), matchSource);
+                }
+                if (dryRun) {
+                    continue;
                 }
                 if (reenableUsers && !user.isEnabled()) {
                     user.setEnabled(true);
@@ -276,19 +325,21 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             }
         }
 
-        if (disableMissingUsers && allDepartmentsLoaded && !activeExternalIds.isEmpty()) {
+        if (!dryRun && disableMissingUsers && allDepartmentsLoaded && !activeExternalIds.isEmpty()) {
             disabled = disableMissingManagedUsers(session, realm, idp, activeExternalIds);
         } else if (disableMissingUsers && !allDepartmentsLoaded) {
             logger.warnf("Skip disabling missing DingTalk users because at least one department failed to load. realm=%s, idp=%s",
                     realm.getName(), idp.getAlias());
         }
 
-        config.put(LAST_PERIODIC_SYNC, String.valueOf(now));
-        idp.setConfig(config);
-        realm.updateIdentityProvider(idp);
+        if (!dryRun) {
+            config.put(LAST_PERIODIC_SYNC, String.valueOf(now));
+            idp.setConfig(config);
+            realm.updateIdentityProvider(idp);
+        }
 
-        logger.infof("DingTalk periodic sync finished. realm=%s, idp=%s, listed=%d, matched=%d, created=%d, linked=%d, updated=%d, reenabled=%d, disabled=%d",
-                realm.getName(), idp.getAlias(), listed, matched, created, linked, updated, reenabled, disabled);
+        logger.infof("DingTalk sync finished. realm=%s, idp=%s, dryRun=%s, listed=%d, matched=%d, created=%d, linked=%d, updated=%d, reenabled=%d, disabled=%d",
+                realm.getName(), idp.getAlias(), dryRun, listed, matched, created, linked, updated, reenabled, disabled);
 
         return new SyncResult(idp.getAlias(), listed, matched, created, linked, updated, reenabled, disabled, false, null);
     }
@@ -513,7 +564,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             return emailPrefix.toLowerCase(Locale.ROOT);
         }
 
-        return Stream.of(namePinyin, emailPrefix, dingtalkUser.getUserId(), dingtalkUser.getUnionId())
+        return Stream.of(namePinyin, emailPrefix)
                 .filter(StringUtils::isNotBlank)
                 .map(String::trim)
                 .map(value -> value.toLowerCase(Locale.ROOT))
@@ -527,7 +578,8 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             case "phone":
                 String mobile = DingTalkIdentityProvider.formatMobile(dingtalkUser.getMobile());
                 for (String attributeName : PHONE_ATTRIBUTE_NAMES) {
-                    Optional<UserModel> byPhone = findFirstByAttribute(session, realm, attributeName, mobile);
+                    Optional<UserModel> byPhone = findUniqueByAttribute(
+                            session, realm, attributeName, mobile, "sync phone");
                     if (byPhone.isPresent()) {
                         return new MatchResult(byPhone.get(), "phone:" + attributeName);
                     }
@@ -537,18 +589,19 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                 if (StringUtils.isBlank(dingtalkUser.getEmail())) {
                     return MatchResult.empty();
                 }
-                UserModel byEmail = session.users().getUserByEmail(realm, dingtalkUser.getEmail());
-                return byEmail == null ? MatchResult.empty() : new MatchResult(byEmail, "email");
+                return findUniqueByEmail(session, realm, dingtalkUser.getEmail(), "sync")
+                        .map(user -> new MatchResult(user, "email"))
+                        .orElseGet(MatchResult::empty);
             case "username":
                 return findByUsernameCandidates(session, realm, dingtalkUser)
                         .map(user -> new MatchResult(user, "username"))
                         .orElseGet(MatchResult::empty);
             case "unionid":
-                return findFirstByAttribute(session, realm, UNION_ID, dingtalkUser.getUnionId())
+                return findUniqueByAttribute(session, realm, UNION_ID, dingtalkUser.getUnionId(), "sync unionid")
                         .map(user -> new MatchResult(user, "unionid"))
                         .orElseGet(MatchResult::empty);
             case "openid":
-                return findFirstByAttribute(session, realm, OPEN_ID, dingtalkUser.getOpenId())
+                return findUniqueByAttribute(session, realm, OPEN_ID, dingtalkUser.getOpenId(), "sync openid")
                         .map(user -> new MatchResult(user, "openid"))
                         .orElseGet(MatchResult::empty);
             default:
@@ -559,13 +612,17 @@ public class DingTalkUserSyncTask implements ScheduledTask {
 
     private Optional<UserModel> findByUsernameCandidates(KeycloakSession session, RealmModel realm,
                                                         UserDto dingtalkUser) {
+        List<UserModel> matches = new ArrayList<>();
         for (String username : usernameCandidates(dingtalkUser)) {
             UserModel byUsername = session.users().getUserByUsername(realm, username);
-            if (byUsername != null) {
-                return Optional.of(byUsername);
+            if (byUsername != null && matches.stream().noneMatch(existing -> existing.getId().equals(byUsername.getId()))) {
+                matches.add(byUsername);
+                if (matches.size() > 1) {
+                    break;
+                }
             }
         }
-        return Optional.empty();
+        return uniqueMatch(matches, "sync username", usernameCandidates(dingtalkUser));
     }
 
     private boolean bindFederatedIdentityIfMissing(KeycloakSession session, RealmModel realm,
@@ -699,14 +756,45 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         return true;
     }
 
-    private Optional<UserModel> findFirstByAttribute(KeycloakSession session, RealmModel realm,
-                                                     String attributeName, String attributeValue) {
+    private Optional<UserModel> findUniqueByEmail(KeycloakSession session, RealmModel realm,
+                                                  String email, String source) {
+        if (StringUtils.isBlank(email)) {
+            return Optional.empty();
+        }
+        List<UserModel> matches = session.users()
+                .searchForUserStream(realm, Map.of(UserModel.EMAIL, email), 0, 2)
+                .filter(user -> email.equalsIgnoreCase(user.getEmail()))
+                .limit(2)
+                .toList();
+        if (matches.isEmpty()) {
+            return Optional.ofNullable(session.users().getUserByEmail(realm, email));
+        }
+        return uniqueMatch(matches, source + " email", email);
+    }
+
+    private Optional<UserModel> findUniqueByAttribute(KeycloakSession session, RealmModel realm,
+                                                     String attributeName, String attributeValue,
+                                                     String source) {
         if (StringUtils.isBlank(attributeValue)) {
             return Optional.empty();
         }
-        return session.users()
+        List<UserModel> matches = session.users()
                 .searchForUserByUserAttributeStream(realm, attributeName, attributeValue)
-                .findFirst();
+                .limit(2)
+                .toList();
+        return uniqueMatch(matches, source + " attribute=" + attributeName, attributeValue);
+    }
+
+    private Optional<UserModel> uniqueMatch(List<UserModel> matches, String source, Object valueForLog) {
+        if (matches.isEmpty()) {
+            return Optional.empty();
+        }
+        if (matches.size() > 1) {
+            logger.warnf("Skip DingTalk sync match by %s: multiple Keycloak users matched value=%s",
+                    source, valueForLog);
+            return Optional.empty();
+        }
+        return Optional.of(matches.get(0));
     }
 
     private String resolveExternalId(UserDto userDto) {
@@ -741,8 +829,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     }
 
     private List<String> usernameCandidates(UserDto userDto) {
-        return Arrays.asList(userDto.getUserId(), emailPrefix(userDto.getEmail()),
-                        DingTalkIdentityProvider.resolveUsername(userDto))
+        return Arrays.asList(emailPrefix(userDto.getEmail()), DingTalkIdentityProvider.resolveUsername(userDto))
                 .stream()
                 .filter(StringUtils::isNotBlank)
                 .map(String::trim)
