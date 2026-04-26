@@ -3,7 +3,7 @@
 本文档用于让 Codex、Claude Code、Copilot 等 AI 工具快速理解和审计本项目。修改代码前先读本文档，再结合 `README.md` 和相关源码确认当前实现。
 
 创建时间：2026-04-26  
-最近同步范围：浏览器同步执行/预览、同步创建用户清理、钉钉机器人通知和浏览器 GET 测试发信入口
+最近同步范围：浏览器同步执行/预览、同步创建用户清理、钉钉机器人通知、失败告警、新用户邮箱后缀、用户名人工校验标记和 AD/LDAP 离职禁用范围
 
 ## 项目定位
 
@@ -14,7 +14,7 @@
 - 支持定期或手动同步钉钉通讯录到 Keycloak。
 - 支持用浏览器临时 dry-run 或正式执行同步，但必须受调试开关和密钥保护。
 - 支持清理由钉钉同步任务自动创建的 Keycloak 用户。
-- 支持用钉钉自定义机器人通知登录或同步真实执行中新创建的用户，以及同步真实执行中跳过创建用户的 WARN。
+- 支持用钉钉自定义机器人通知登录或同步真实执行中新创建的用户，以及同步真实执行中跳过创建用户的告警。
 
 ## 核心文件地图
 
@@ -28,6 +28,7 @@
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResource.java` | 浏览器公开地址页面和执行入口；执行入口不需要 Bearer token，但必须开启 GET 调试开关并提供调试密钥 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResourceProvider*.java` | 浏览器公开 REST Provider 和 Factory，注册 `/realms/{realm}/dingtalk-sync/...` |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.java` | 清理由钉钉同步自动创建的 Keycloak 用户 |
+| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkCreatedUserInitializer.java` | 同步创建提交后，在独立事务中初始化临时密码、强制首次改密、启用用户，并在激活后拆分中文姓名属性 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkWebhookNotifier.java` | 钉钉自定义机器人通知，支持加签、登录创建通知和同步批量通知 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkLoginEventListenerProvider.java` | 登录/注册事件监听，给历史钉钉用户补齐企业插件角色 |
 | `src/main/java/com/tencent/keycloak/dingtalk/DingTalkLoginEventListenerProviderFactory.java` | 登录/注册事件监听 Factory |
@@ -72,6 +73,12 @@
 - 如果邮箱前缀与姓名拼音一致，也使用邮箱前缀。
 - 没有可解析 username 时不创建。
 - 不再使用纯数字钉钉 userid 作为 Keycloak username。
+- username 只在创建新用户时生成；后续同步不得自动修改已有用户 username。
+- 登录自动创建成功后仍会尽力写入 `dingtalk_username_locked=true`、`dingtalk_username_source` 和 `dingtalk_username_suggested`，用于标记自动拼音创建结果已进入人工校验/修正流程；定期同步创建为了兼容 AD create-only 流程，不在创建后补写这些属性。
+- 如果配置了 `provisionedEmailDomain`，新用户创建邮箱使用 `username@后缀`，用于同步注册到 AD 时写入邮箱；为空时使用钉钉返回的邮箱。该规则只影响新建用户。
+- 定期同步新用户创建会模拟后台 Admin Console 路径，通过 `UserProfileProvider.create(USER_API, rawAttributes).create()` 在创建阶段一次性传入手动验证可创建 AD 用户的字段集合：`username`、邮箱、`firstName`、`phoneNumber`、`nickname` 和 `dingtalk_userid`。中文钉钉昵称完整写入 `firstName` 和 `nickname`，不再拆分 `lastName`，例如 `丁杰 -> firstName=丁杰, nickname=丁杰`；这样在保留 LDAP FullName/CN mapper 时，AD `cn` 不会被 Keycloak 按 `firstName + 空格 + lastName` 写成带空格的中文名。若 LDAP provider 配置了 FullName/CN mapper，最终 `cn` 是否落为中文取决于 LDAP mapper 和 AD 权限。
+- 同步创建本身只负责创建账号和写入上述创建期属性，不写入密码，不在创建事务内强制启用用户，也不在创建后补写托管标记、用户名锁定标记或其他钉钉元数据。创建成功后会立即调用 `UserModel.setEmailVerified(true)` 开启 Keycloak 电子邮箱验证标记；这不是 LDAP 普通属性映射，不应通过 `rawAttributes` 伪装为普通 `emailVerified` 属性。
+- 如开启 `periodicSyncInitializeCreatedUsers=true`，创建事务提交成功后会先在独立事务中生成 24 位强复杂度随机临时密码，通过 Keycloak credential manager 写入密码，添加 `UPDATE_PASSWORD` required action 强制首次改密，然后启用用户。初始化成功提交后，再开启第二个独立事务，把完整中文名按首字和剩余部分拆成 `firstName` / `lastName` 用户属性；这里必须使用 `UserModel.setSingleAttribute(...)` 写属性，不调用 `setFirstName` / `setLastName` 根字段 setter，避免再次触发 LDAP FullName/CN mapper 把 AD `cn` 改成带空格中文名。临时密码不得写入日志、Webhook 或同步响应；初始化失败不得回滚已提交的创建事务，应记录 WARN 并保持账号未完成初始化状态。
 
 ### 禁用离职用户
 
@@ -79,9 +86,13 @@
 
 关键保护：
 
-- 只处理当前钉钉 IdP 标记为托管的用户。
+- 默认只处理当前钉钉 IdP 标记为托管，或已绑定当前钉钉 IdP federated identity 的用户。
+- 如果显式开启 `periodicSyncDisableExternalUsers=true`，会处理 LDAP/AD 等外部存储用户，但必须用本轮钉钉通讯录的 username、email、phoneNumber/mobile/telephoneNumber 命中保护仍在职用户；缺失用户扫描必须发生在本轮用户字段写入、身份绑定和 lastSync 更新时间戳写入之前，避免 Keycloak 外部用户校验和 invalid-user 清理与当前事务内的大量同步写入互相锁住。若任一 User Storage 开启 `removeInvalidUsersEnabled`，外部存储全量扫描必须跳过，避免触发 Keycloak 在同步事务内删除 invalid federated user。AD 机器账号（username 以 `$` 结尾）和 service account 不是员工离职候选，不应被禁用。
+- 启用 Webhook 时，本轮被禁用的离职账号必须汇总通知管理员；通知只允许包含 Keycloak username 和禁用原因，不输出手机号、邮箱或 LDAP DN。
+- 返聘自动重新启用只处理之前由本插件按 `missing_from_dingtalk` 禁用、且重新出现在钉钉通讯录的用户；不得启用同步刚创建或其他原因禁用的账号。
 - 任一部门或子部门拉取失败时，本轮不禁用任何用户。
-- `activeExternalIds` 为空时不禁用。
+- 本轮没有加载到任何可用于比对的钉钉身份时不禁用。
+- Keycloak 是否能把禁用写回 AD，取决于 LDAP provider、MSAD account controls mapper 和绑定账号权限。
 
 关键位置：
 
@@ -99,7 +110,7 @@
 - `dingtalk_created_by_sync == true`
 - 用户已绑定当前钉钉 IdP 的 federated identity
 
-这意味着：仅被同步匹配、绑定、更新过的既有 Keycloak/AD 用户不会被删除。
+这意味着：仅被同步匹配、绑定、更新过的既有 Keycloak/AD 用户不会被删除。为兼容 AD create-only，同步创建新用户不再在创建后补写托管标记或 `dingtalk_created_by_sync`；清理入口仍只处理历史已标记用户或管理员显式保留该标记的用户。
 
 关键文件：
 
@@ -136,7 +147,8 @@
 
 - 登录链路新创建 Keycloak 用户。
 - 同步真实执行中新创建 Keycloak 用户。
-- 同步真实执行中，因生成 username 为空或 username 已存在但无可信匹配而跳过创建的 WARN。
+- 同步真实执行中，因生成用户名为空或用户名已存在但无可信匹配而跳过创建的告警。
+- 定时同步、管理端真实同步或浏览器真实同步抛出异常失败时发送失败告警；失败告警只包含领域、身份源、执行方式、异常类型和脱敏短原因。
 - 管理端 `POST /test-webhook?alias={alias}` 可发送一条测试消息，便于验证 Webhook、关键词和加签配置。
 - 浏览器公开 `GET /test-webhook?alias={alias}&key={debugKey}` 可发送一条测试消息，必须受浏览器公开入口保护条件约束。
 
@@ -147,6 +159,8 @@
 - dry-run 不发送通知。
 - 发送失败不能中断登录或同步，只能记录 WARN。
 - 通知内容必须脱敏，不输出手机号、邮箱、token、secret、Webhook access_token 或加签密钥。
+- 新用户创建成功通知必须在事务提交后重新按 username 查询确认用户可检索再发送；若事务回滚，或提交后仍无法按 username 查到新用户，必须改发未落库/未确认告警，并提示管理员检查 Keycloak 日志、AD/LDAP 同步注册和用户存储写入权限。通知正文使用中文标签，可展示钉钉昵称和邮箱规则，不输出个人邮箱明文。管理员手工修正后的用户名不应被后续同步覆盖。
+- 字段级只读或写入失败但整轮同步继续执行时，只记录 Keycloak WARN，不逐用户发送机器人消息。
 - 同步通知必须批量汇总，避免每个用户一条消息刷屏。
 
 关键文件：
@@ -183,7 +197,7 @@
 | `POST /cleanup-sync-created-users?alias={alias}&key={debugKey}` | dry-run 清理预览，不删除 |
 | `GET /test-webhook?alias={alias}&key={debugKey}` | 发送钉钉机器人测试消息 |
 
-后台 Identity Provider 配置页会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这个固定相对路径直接内置在插件 JAR 的 `ProviderConfigProperty.URL_TYPE` 默认值里，不保存到钉钉 IdP config；浏览器会按当前站点域名解析该相对路径。该后台入口不含 `{realm}`，只作为页面入口。页面内部负责切换 Realm、选择 IdP、临时填写本次调试密钥，并把地址分成两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。提交不同 Realm 时服务端会跳转到对应 `/realms/<realm>/dingtalk-sync/endpoints`，真实接口地址由所选 Realm 的 REST Provider 路由决定。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此插件页面承载访问和复制按钮。入口路径只用于后台展示，插件执行同步时不会读取它。
+后台 Identity Provider 配置页会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这个固定路径直接内置在插件 JAR 的 `ProviderConfigProperty.URL_TYPE` 默认值里；为适配 Keycloak 26 管理台 `URL_TYPE` 只从表单对象 `value` 字段生成链接的行为，插件会在钉钉 IdP config 中补齐 `dingtalkEndpointReferencePage` 和 `value` 固定值，但这些值只用于后台链接展示，不参与同步运行配置。浏览器会按当前站点域名解析该路径。该后台入口不含 `{realm}`，只作为页面入口。页面内部负责切换 Realm、选择 IdP、临时填写本次调试密钥，并把地址分成两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。提交不同 Realm 时服务端会跳转到对应 `/realms/<realm>/dingtalk-sync/endpoints`，真实接口地址由所选 Realm 的 REST Provider 路由决定。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此插件页面承载访问和复制按钮。入口路径只用于后台展示，插件执行同步时不会读取它。
 
 ## 同步结果语义
 
@@ -200,6 +214,8 @@
 - `reason`: 跳过原因。
 
 dry-run 必须尽量反映真实执行会发生的变化，但不能写入用户、绑定、lastSync 或 IdP 配置。
+
+真实同步遇到 LDAP/外部存储返回 `ReadOnlyException` 的用户时，不应让单个用户属性写入失败中断整轮同步；应记录 WARN 并继续处理后续用户。`dingtalk_*` 这类钉钉元数据写失败不能阻断 `phoneNumber`、`email` 等业务同步字段继续写入；具体字段最终是否可写取决于 LDAP provider、User Attribute Mapper 和目标 AD 属性权限。
 
 ## 日志与脱敏
 
@@ -233,7 +249,7 @@ mvn test
 mvn clean package
 git diff --check
 shasum -a 256 dist/keycloak-dingtalk-provider.jar target/keycloak-dingtalk-provider.jar
-jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncAdminResource|SyncBrowserResource|SyncCreatedUserCleanup|WebhookNotifier)"
+jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncAdminResource|SyncBrowserResource|SyncCreatedUserCleanup|CreatedUserInitializer|WebhookNotifier)"
 ```
 
 期望：
@@ -242,7 +258,7 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncAdminResource|Sync
 - `mvn clean package` 通过。
 - `git diff --check` 无输出。
 - 如果更新了可部署包，`dist/keycloak-dingtalk-provider.jar` 应与 `target/keycloak-dingtalk-provider.jar` SHA 一致。
-- JAR 中应有 `DingTalkSyncAdminResource`、`DingTalkSyncBrowserResource`、`DingTalkSyncCreatedUserCleanup` 和 `DingTalkWebhookNotifier`，不应有旧的 `DingTalkNumericUserCleanup`。
+- JAR 中应有 `DingTalkSyncAdminResource`、`DingTalkSyncBrowserResource`、`DingTalkSyncCreatedUserCleanup`、`DingTalkCreatedUserInitializer` 和 `DingTalkWebhookNotifier`，不应有旧的 `DingTalkNumericUserCleanup`。
 
 ## 发布包注意事项
 

@@ -18,6 +18,7 @@
 package com.tencent.keycloak.dingtalk;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.keycloak.broker.oidc.OAuth2IdentityProviderConfig;
@@ -26,6 +27,7 @@ import org.keycloak.broker.social.SocialIdentityProviderFactory;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
@@ -54,16 +56,17 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     static final String SYNC_GET_DEBUG_ENABLED = "syncGetDebugEnabled";
     static final String BROWSER_SYNC_DEBUG_KEY = "browserSyncDebugKey";
     static final String ENDPOINT_REFERENCE_PAGE_CONFIG = "dingtalkEndpointReferencePage";
+    static final String ENDPOINT_REFERENCE_PAGE_HREF_CONFIG = "value";
+    // Keycloak 26 URL_TYPE reads useWatch(name).value, so the field watches the config object.
+    static final String ENDPOINT_REFERENCE_PAGE_FORM_FIELD = "config";
     static final String ENDPOINT_REFERENCE_PAGE_URL = "/realms/master/dingtalk-sync/endpoints";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
     private static final String ENDPOINT_REFERENCE_HELP =
             "接口地址可通过下方“接口地址页面入口”查看；打开页面后可切换 Realm，并生成、复制和打开同步、清理、Webhook 测试地址。";
-    private static final String ENDPOINT_REFERENCE_HELP_TEXT =
-            "固定入口路径，不参与运行配置；打开后可在页面内切换 Realm 和选择钉钉 IdP。实际接口地址由页面选择的 Realm 生成。";
     private static final List<EndpointReference> ENDPOINT_REFERENCES = List.of(
             new EndpointReference(
-                    ENDPOINT_REFERENCE_PAGE_CONFIG,
+                    ENDPOINT_REFERENCE_PAGE_FORM_FIELD,
                     "接口地址页面入口",
                     ENDPOINT_REFERENCE_PAGE_URL));
 
@@ -74,12 +77,16 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     @Override
     public DingTalkIdentityProvider create(KeycloakSession session, IdentityProviderModel model) {
+        boolean updated = ensureEndpointReferenceConfig(model);
+        persistEndpointReferenceConfig(session, model, updated);
         return new DingTalkIdentityProvider(session, new OAuth2IdentityProviderConfig(model));
     }
 
     @Override
     public IdentityProviderModel createConfig() {
-        return new OAuth2IdentityProviderConfig();
+        IdentityProviderModel config = new OAuth2IdentityProviderConfig();
+        ensureEndpointReferenceConfig(config);
+        return config;
     }
 
     @Override
@@ -98,6 +105,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                         PERIODIC_SYNC_CHECK_INTERVAL_MS,
                         DingTalkUserSyncTask.TASK_NAME);
             }
+            persistEndpointReferenceConfigs(session);
         });
     }
 
@@ -150,6 +158,11 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .type(ProviderConfigProperty.TEXT_TYPE)
                 .defaultValue("phone,email")
                 .add()
+                .property().name(DingTalkUserSyncTask.PROVISIONED_EMAIL_DOMAIN)
+                .label("新用户邮箱后缀")
+                .helpText("创建新 Keycloak/AD 用户时使用 username@该后缀 作为邮箱，例如 example.com；为空时使用钉钉返回的邮箱。只影响新建用户，不修改已有用户邮箱")
+                .type(ProviderConfigProperty.STRING_TYPE)
+                .add()
                 .property().name(DingTalkUserSyncTask.PERIODIC_SYNC_ENABLED)
                 .label("启用定期同步钉钉通讯录")
                 .helpText("开启后 Keycloak 会定期读取钉钉通讯录，先按已绑定钉钉身份定位，再按配置的 phone、email、unionId、openId、username 规则匹配已有用户并绑定钉钉身份；默认关闭")
@@ -192,15 +205,27 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(false)
                 .add()
+                .property().name(DingTalkCreatedUserInitializer.INITIALIZE_CREATED_USERS)
+                .label("同步创建后初始化密码并启用")
+                .helpText("默认关闭。开启后，同步创建用户的事务提交成功后，会在独立事务中生成随机临时密码、要求首次登录修改密码，并启用用户；临时密码不会写入日志或 Webhook")
+                .type(ProviderConfigProperty.BOOLEAN_TYPE)
+                .defaultValue(false)
+                .add()
                 .property().name(DingTalkUserSyncTask.PERIODIC_SYNC_DISABLE_MISSING_USERS)
                 .label("定期同步禁用离职用户")
-                .helpText("开启后，仅禁用之前由当前钉钉同步任务标记为托管、但本次通讯录不存在的 Keycloak 用户；默认关闭")
+                .helpText("开启后，禁用已由当前钉钉 IdP 托管或已绑定当前钉钉 IdP、但本次通讯录不存在的 Keycloak 用户；默认关闭。AD 是否同步禁用取决于 LDAP provider 和 MSAD account controls mapper")
+                .type(ProviderConfigProperty.BOOLEAN_TYPE)
+                .defaultValue(false)
+                .add()
+                .property().name(DingTalkUserSyncTask.PERIODIC_SYNC_DISABLE_EXTERNAL_USERS)
+                .label("禁用未出现在钉钉的外部存储用户")
+                .helpText("危险开关，默认关闭。仅在钉钉同步部门完整代表 AD 员工范围时开启；开启后会在写入同步字段前扫描 LDAP/AD 等外部存储用户，用 username、email、phoneNumber/mobile/telephoneNumber 与本次钉钉通讯录比对。若 User Storage 开启 removeInvalidUsersEnabled 会跳过外部扫描；AD 机器账号（username 以 $ 结尾）和 service account 不会被禁用")
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(false)
                 .add()
                 .property().name(DingTalkUserSyncTask.PERIODIC_SYNC_REENABLE_USERS)
                 .label("定期同步重新启用返聘用户")
-                .helpText("开启后，已被禁用的钉钉托管用户重新出现在通讯录时会自动启用；默认开启")
+                .helpText("开启后，仅将之前由本插件按 missing_from_dingtalk 禁用、且重新出现在钉钉通讯录的用户自动启用；默认开启")
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(true)
                 .add()
@@ -212,7 +237,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(DingTalkWebhookNotifier.NOTIFICATION_WEBHOOK_ENABLED)
                 .label("启用钉钉机器人通知")
-                .helpText("默认关闭。开启并配置 Webhook 地址后，会通知登录链路新创建用户、同步真实执行中新创建用户，以及同步真实执行中因 username 为空或 username 冲突而跳过创建的 WARN；dry-run 不发送通知")
+                .helpText("默认关闭。开启并配置 Webhook 地址后，会通知登录链路新创建用户、同步真实执行中新创建用户、同步真实执行中因用户名为空或用户名冲突而跳过创建的告警，以及定时/手动/浏览器真实同步失败告警；dry-run 不发送通知")
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(false)
                 .add()
@@ -253,11 +278,92 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
         ProviderConfigProperty property = new ProviderConfigProperty(
                 reference.name(),
                 reference.label(),
-                ENDPOINT_REFERENCE_HELP_TEXT,
+                reference.url(),
                 ProviderConfigProperty.URL_TYPE,
                 reference.url());
         property.setReadOnly(true);
         return property;
+    }
+
+    static boolean ensureEndpointReferenceConfig(IdentityProviderModel model) {
+        if (model == null) {
+            return false;
+        }
+        Map<String, String> config = model.getConfig();
+        if (config == null) {
+            config = new HashMap<>();
+            model.setConfig(config);
+        } else if (hasEndpointReferenceConfig(config)) {
+            return false;
+        } else {
+            config = new HashMap<>(config);
+            model.setConfig(config);
+        }
+        config.put(ENDPOINT_REFERENCE_PAGE_CONFIG, ENDPOINT_REFERENCE_PAGE_URL);
+        config.put(ENDPOINT_REFERENCE_PAGE_HREF_CONFIG, ENDPOINT_REFERENCE_PAGE_URL);
+        return true;
+    }
+
+    private static boolean hasEndpointReferenceConfig(Map<String, String> config) {
+        return ENDPOINT_REFERENCE_PAGE_URL.equals(config.get(ENDPOINT_REFERENCE_PAGE_CONFIG))
+                && ENDPOINT_REFERENCE_PAGE_URL.equals(config.get(ENDPOINT_REFERENCE_PAGE_HREF_CONFIG));
+    }
+
+    private static void persistEndpointReferenceConfig(
+            KeycloakSession session,
+            IdentityProviderModel model,
+            boolean updated) {
+        if (!updated || session == null || model == null || model.getAlias() == null) {
+            return;
+        }
+        RealmModel realm = session.getContext().getRealm();
+        if (realm == null) {
+            return;
+        }
+        IdentityProviderModel persisted = realm.getIdentityProviderByAlias(model.getAlias());
+        if (persisted == null || !PROVIDER_ID.equals(persisted.getProviderId())) {
+            return;
+        }
+        if (persisted == model) {
+            realm.updateIdentityProvider(model);
+            return;
+        }
+        Map<String, String> config = persisted.getConfig() == null
+                ? new HashMap<>()
+                : new HashMap<>(persisted.getConfig());
+        if (hasEndpointReferenceConfig(config)) {
+            return;
+        }
+        config.put(ENDPOINT_REFERENCE_PAGE_CONFIG, ENDPOINT_REFERENCE_PAGE_URL);
+        config.put(ENDPOINT_REFERENCE_PAGE_HREF_CONFIG, ENDPOINT_REFERENCE_PAGE_URL);
+        persisted.setConfig(config);
+        realm.updateIdentityProvider(persisted);
+    }
+
+    private static void persistEndpointReferenceConfigs(KeycloakSession session) {
+        if (session == null) {
+            return;
+        }
+        RealmModel originalRealm = session.getContext().getRealm();
+        try {
+            session.realms().getRealmsStream().forEach(realm -> {
+                RealmModel previousRealm = session.getContext().getRealm();
+                session.getContext().setRealm(realm);
+                try {
+                    realm.getIdentityProvidersStream()
+                            .filter(idp -> PROVIDER_ID.equals(idp.getProviderId()))
+                            .forEach(idp -> {
+                                if (ensureEndpointReferenceConfig(idp)) {
+                                    realm.updateIdentityProvider(idp);
+                                }
+                            });
+                } finally {
+                    session.getContext().setRealm(previousRealm);
+                }
+            });
+        } finally {
+            session.getContext().setRealm(originalRealm);
+        }
     }
 
     private record EndpointReference(String name, String label, String url) {}

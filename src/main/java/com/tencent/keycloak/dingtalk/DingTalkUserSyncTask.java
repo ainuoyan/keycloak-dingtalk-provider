@@ -9,6 +9,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -20,13 +21,20 @@ import java.util.stream.Stream;
 import jakarta.ws.rs.core.UriBuilder;
 import org.apache.commons.lang3.StringUtils;
 import org.jboss.logging.Logger;
+import org.keycloak.component.ComponentModel;
 import org.keycloak.http.simple.SimpleHttp;
 import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.storage.ReadOnlyException;
+import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.timer.ScheduledTask;
+import org.keycloak.userprofile.UserProfile;
+import org.keycloak.userprofile.UserProfileContext;
+import org.keycloak.userprofile.UserProfileProvider;
 
 /**
  * 定期把钉钉通讯录信息同步到已存在的 Keycloak 用户。
@@ -41,9 +49,11 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     static final String PERIODIC_SYNC_OVERWRITE_EXISTING = "periodicSyncOverwriteExisting";
     static final String PERIODIC_SYNC_CREATE_USERS = "periodicSyncCreateUsers";
     static final String PERIODIC_SYNC_DISABLE_MISSING_USERS = "periodicSyncDisableMissingUsers";
+    static final String PERIODIC_SYNC_DISABLE_EXTERNAL_USERS = "periodicSyncDisableExternalUsers";
     static final String PERIODIC_SYNC_REENABLE_USERS = "periodicSyncReenableUsers";
     static final String PERIODIC_SYNC_DETAILED_LOG = "periodicSyncDetailedLog";
     static final String PERIODIC_SYNC_INCLUDE_CHILD_DEPARTMENTS = "periodicSyncIncludeChildDepartments";
+    static final String PROVISIONED_EMAIL_DOMAIN = "provisionedEmailDomain";
     static final String LAST_PERIODIC_SYNC = "lastPeriodicSync";
 
     private static final Logger logger = Logger.getLogger(DingTalkUserSyncTask.class);
@@ -65,7 +75,13 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     private static final String DINGTALK_LAST_SYNC = "dingtalk_last_sync";
     private static final String DINGTALK_LAST_SYNC_AT = "dingtalk_last_sync_at";
     static final String DINGTALK_CREATED_BY_SYNC = "dingtalk_created_by_sync";
+    static final String DINGTALK_USERNAME_LOCKED = "dingtalk_username_locked";
+    static final String DINGTALK_USERNAME_SOURCE = "dingtalk_username_source";
+    static final String DINGTALK_USERNAME_SUGGESTED = "dingtalk_username_suggested";
     private static final String DINGTALK_DISABLED_REASON = "dingtalk_disabled_reason";
+    private static final String DINGTALK_DISABLED_REASON_MISSING = "missing_from_dingtalk";
+    static final String USERNAME_SOURCE_AUTO_PINYIN = "auto-pinyin";
+    static final String USERNAME_SOURCE_LOGIN_AUTO_PINYIN = "login-auto-pinyin";
     private static final List<String> PHONE_ATTRIBUTE_NAMES = List.of("phoneNumber", "mobile", "telephoneNumber");
     private static final ZoneId BEIJING_ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter BEIJING_TIME_FORMATTER =
@@ -102,6 +118,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             } catch (Exception e) {
                 logger.errorf(e, "DingTalk periodic sync failed. realm=%s, idp=%s",
                         realm.getName(), idp.getAlias());
+                DingTalkWebhookNotifier.notifySyncFailed(session, realm, idp, "periodic", false, e);
             }
         }
     }
@@ -117,12 +134,15 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     }
 
     private void restorePreviousRealm(KeycloakSession session, RealmModel previousRealm) {
-        if (previousRealm != null) {
-            session.getContext().setRealm(previousRealm);
-        }
+        session.getContext().setRealm(previousRealm);
     }
 
     SyncResult syncProviderNow(KeycloakSession session, RealmModel realm, String alias) throws Exception {
+        return syncProviderNow(session, realm, alias, "manual");
+    }
+
+    SyncResult syncProviderNow(KeycloakSession session, RealmModel realm, String alias, String failureNotificationMode)
+            throws Exception {
         List<IdentityProviderModel> providers = realm.getIdentityProvidersStream()
                 .filter(idp -> PROVIDER_ID.equals(idp.getProviderId()))
                 .filter(IdentityProviderModel::isEnabled)
@@ -133,11 +153,16 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             throw new IllegalArgumentException("No enabled DingTalk identity provider matched alias: " + alias);
         }
 
-        SyncResult total = SyncResult.empty(StringUtils.defaultIfBlank(alias, "*"));
+        List<SyncResult> results = new ArrayList<>();
         for (IdentityProviderModel idp : providers) {
-            total = total.plus(syncProvider(session, realm, idp, true, false));
+            try {
+                results.add(syncProvider(session, realm, idp, true, false));
+            } catch (Exception e) {
+                DingTalkWebhookNotifier.notifySyncFailed(session, realm, idp, failureNotificationMode, false, e);
+                throw e;
+            }
         }
-        return total;
+        return SyncResult.aggregate(StringUtils.defaultIfBlank(alias, "*"), results);
     }
 
     SyncResult previewProviderNow(KeycloakSession session, RealmModel realm, String alias) throws Exception {
@@ -151,11 +176,11 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             throw new IllegalArgumentException("No enabled DingTalk identity provider matched alias: " + alias);
         }
 
-        SyncResult total = SyncResult.empty(StringUtils.defaultIfBlank(alias, "*"));
+        List<SyncResult> results = new ArrayList<>();
         for (IdentityProviderModel idp : providers) {
-            total = total.plus(syncProvider(session, realm, idp, true, true));
+            results.add(syncProvider(session, realm, idp, true, true));
         }
-        return total;
+        return SyncResult.aggregate(StringUtils.defaultIfBlank(alias, "*"), results);
     }
 
     private SyncResult syncProvider(KeycloakSession session, RealmModel realm,
@@ -189,6 +214,7 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         List<String> matchRules = DingTalkIdentityProvider.parseMatchRules(config.get("matchRules"));
         boolean createUsers = isCreateUsersEnabled(config);
         boolean disableMissingUsers = isDisableMissingUsersEnabled(config);
+        boolean disableExternalUsers = isDisableExternalUsersEnabled(config);
         boolean reenableUsers = isReenableUsersEnabled(config);
         boolean detailedLog = isDetailedLogEnabled(config);
         boolean includeChildDepartments = isIncludeChildDepartmentsEnabled(config);
@@ -201,10 +227,10 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         }
 
         if (detailedLog) {
-            logger.infof("DingTalk sync detail started. realm=%s, idp=%s, mode=%s, dryRun=%s, departments=%s, includeChildDepartments=%s, matchRules=%s, syncFields=%s, createUsers=%s, disableMissingUsers=%s, overwriteExisting=%s",
+            logger.infof("DingTalk sync detail started. realm=%s, idp=%s, mode=%s, dryRun=%s, departments=%s, includeChildDepartments=%s, matchRules=%s, syncFields=%s, createUsers=%s, disableMissingUsers=%s, disableExternalUsers=%s, overwriteExisting=%s",
                     realm.getName(), idp.getAlias(), force ? "manual" : "periodic", dryRun,
                     parseDepartmentIds(config.get(PERIODIC_SYNC_DEPARTMENT_IDS)), includeChildDepartments,
-                    matchRules, syncFields, createUsers, disableMissingUsers, overwriteExisting);
+                    matchRules, syncFields, createUsers, disableMissingUsers, disableExternalUsers, overwriteExisting);
         }
         DingTalkWebhookNotifier.Batch notifications = DingTalkWebhookNotifier.syncBatch(
                 session, realm, idp, force ? "manual" : "periodic", dryRun);
@@ -217,8 +243,9 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         int disabled = 0;
         int reenabled = 0;
         boolean allDepartmentsLoaded = true;
-        Set<String> activeExternalIds = new HashSet<>();
+        ActiveDingTalkUsers activeUsers = new ActiveDingTalkUsers();
         Set<String> seenUserKeys = new HashSet<>();
+        List<UserDto> dingtalkUsers = new ArrayList<>();
         String corpId = DingTalkIdentityProvider.resolveEnterpriseId(config, null);
         DepartmentPlan departmentPlan = resolveDepartmentsToSync(
                 session,
@@ -253,114 +280,151 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                 }
 
                 listed++;
-                String externalId = resolveExternalId(dingtalkUser);
-                if (StringUtils.isNotBlank(externalId)) {
-                    activeExternalIds.add(externalId);
-                }
+                activeUsers.add(dingtalkUser);
+                dingtalkUsers.add(dingtalkUser);
+            }
+        }
 
-                MatchResult matchResult = findBoundOrMatchedUser(session, realm, idp, dingtalkUser, matchRules);
-                UserModel user = matchResult.user();
-                String matchSource = matchResult.source();
-                if (user == null) {
-                    if (dryRun && createUsers) {
-                        String provisionedUsername = resolveProvisionedUsername(dingtalkUser);
-                        UserModel existing = StringUtils.isBlank(provisionedUsername)
-                                ? null
-                                : session.users().getUserByUsername(realm, provisionedUsername);
-                        if (StringUtils.isBlank(provisionedUsername) || existing != null) {
-                            if (detailedLog) {
-                                logger.infof("DingTalk sync detail would skip creating user. realm=%s, idp=%s, dingtalkUser=%s, username=%s, reason=%s",
-                                        realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
-                                        provisionedUsername,
-                                        StringUtils.isBlank(provisionedUsername) ? "username is empty" : "username already exists");
-                            }
-                            continue;
-                        }
-                        created++;
-                        matched++;
-                        if (StringUtils.isNotBlank(resolveExternalId(dingtalkUser))) {
-                            linked++;
-                        }
-                        updated++;
+        if (!dryRun && disableMissingUsers && allDepartmentsLoaded && activeUsers.hasAnyIdentity()) {
+            disabled = disableMissingManagedUsers(session, realm, idp, activeUsers, disableExternalUsers, notifications);
+        } else if (dryRun && disableMissingUsers && allDepartmentsLoaded && activeUsers.hasAnyIdentity()) {
+            disabled = findMissingManagedUsers(session, realm, idp, activeUsers, disableExternalUsers).size();
+        } else if (disableMissingUsers && !allDepartmentsLoaded) {
+            logger.warnf("Skip disabling missing DingTalk users because at least one department failed to load. realm=%s, idp=%s",
+                    realm.getName(), idp.getAlias());
+        } else if (disableMissingUsers && !activeUsers.hasAnyIdentity()) {
+            logger.warnf("Skip disabling missing DingTalk users because no active DingTalk identities were loaded. realm=%s, idp=%s",
+                    realm.getName(), idp.getAlias());
+        }
+
+        for (UserDto dingtalkUser : dingtalkUsers) {
+            MatchResult matchResult = findBoundOrMatchedUser(session, realm, idp, dingtalkUser, matchRules);
+            UserModel user = matchResult.user();
+            String matchSource = matchResult.source();
+            Optional<ProvisionResult> provisionResult = Optional.empty();
+            boolean createdThisSync = false;
+            if (user == null) {
+                if (dryRun && createUsers) {
+                    String provisionedUsername = resolveProvisionedUsername(dingtalkUser);
+                    UserModel existing = StringUtils.isBlank(provisionedUsername)
+                            ? null
+                            : session.users().getUserByUsername(realm, provisionedUsername);
+                    if (StringUtils.isBlank(provisionedUsername) || existing != null) {
                         if (detailedLog) {
-                            logger.infof("DingTalk sync detail would create user. realm=%s, idp=%s, dingtalkUser=%s, username=%s",
+                            logger.infof("DingTalk sync detail would skip creating user. realm=%s, idp=%s, dingtalkUser=%s, username=%s, reason=%s",
                                     realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
-                                    provisionedUsername);
+                                    provisionedUsername,
+                                    StringUtils.isBlank(provisionedUsername) ? "username is empty" : "username already exists");
                         }
                         continue;
                     }
-                    Optional<ProvisionResult> provisionResult = createUsers
-                            ? createUser(session, realm, idp, dingtalkUser, notifications)
-                            : Optional.empty();
-                    if (provisionResult.isEmpty()) {
-                        if (detailedLog) {
-                            logger.infof("DingTalk sync detail skipped user. realm=%s, idp=%s, dingtalkUser=%s, reason=no matched Keycloak user and auto-create disabled or impossible",
-                                    realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser));
-                        }
-                        continue;
-                    }
-                    user = provisionResult.get().user();
-                    matchSource = provisionResult.get().source();
-                    if (provisionResult.get().created()) {
-                        created++;
-                    }
-                }
-
-                matched++;
-                if (detailedLog) {
-                    logger.infof("DingTalk sync detail matched user. realm=%s, idp=%s, dingtalkUser=%s, keycloakUsername=%s, source=%s",
-                            realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
-                            user.getUsername(), matchSource);
-                }
-                if (dryRun) {
-                    if (reenableUsers && !user.isEnabled()) {
-                        reenabled++;
-                    }
-                    boolean linkChanged = wouldBindFederatedIdentity(session, realm, idp, user, dingtalkUser);
-                    if (linkChanged) {
+                    created++;
+                    matched++;
+                    if (StringUtils.isNotBlank(resolveExternalId(dingtalkUser))) {
                         linked++;
                     }
-                    boolean managedChanged = wouldMarkManagedUser(user, idp, dingtalkUser, corpId);
-                    if (wouldApplyUserUpdates(user, dingtalkUser, corpId, syncFields, overwriteExisting)) {
-                        updated++;
-                    } else if (managedChanged) {
-                        updated++;
-                    } else if (detailedLog && !linkChanged) {
-                        logger.infof("DingTalk sync detail would leave user unchanged. realm=%s, idp=%s, username=%s, syncFields=%s, overwriteExisting=%s",
-                                realm.getName(), idp.getAlias(), user.getUsername(), syncFields, overwriteExisting);
+                    if (detailedLog) {
+                        logger.infof("DingTalk sync detail would create user. realm=%s, idp=%s, dingtalkUser=%s, username=%s",
+                                realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
+                                provisionedUsername);
                     }
                     continue;
                 }
-                if (reenableUsers && !user.isEnabled()) {
-                    user.setEnabled(true);
-                    user.removeAttribute(DINGTALK_DISABLED_REASON);
-                    reenabled++;
-                    logger.infof("DingTalk sync re-enabled user. realm=%s, idp=%s, username=%s",
-                            realm.getName(), idp.getAlias(), user.getUsername());
+                provisionResult = createUsers
+                        ? createUser(session, realm, idp, dingtalkUser, notifications)
+                        : Optional.empty();
+                if (provisionResult.isEmpty()) {
+                    if (detailedLog) {
+                        logger.infof("DingTalk sync detail skipped user. realm=%s, idp=%s, dingtalkUser=%s, reason=no matched Keycloak user and auto-create disabled or impossible",
+                                realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser));
+                    }
+                    continue;
                 }
-                boolean linkChanged = bindFederatedIdentityIfMissing(session, realm, idp, user, dingtalkUser);
+                user = provisionResult.get().user();
+                matchSource = provisionResult.get().source();
+                if (provisionResult.get().created()) {
+                    created++;
+                    createdThisSync = true;
+                }
+            }
+
+            matched++;
+            if (detailedLog) {
+                logger.infof("DingTalk sync detail matched user. realm=%s, idp=%s, dingtalkUser=%s, keycloakUsername=%s, source=%s",
+                        realm.getName(), idp.getAlias(), describeDingTalkUser(dingtalkUser),
+                        user.getUsername(), matchSource);
+            }
+            boolean createOnlyUser = shouldKeepCreateOnly(user, matchSource, dingtalkUser, createdThisSync);
+            if (dryRun) {
+                if (reenableUsers && isReenableCandidate(user, false)) {
+                    reenabled++;
+                }
+                boolean linkChanged = wouldBindFederatedIdentity(session, realm, idp, user, dingtalkUser);
                 if (linkChanged) {
                     linked++;
                 }
-                boolean managedChanged = markManagedUser(user, idp, dingtalkUser, corpId, now);
-                if (applyUserUpdates(user, dingtalkUser, corpId, syncFields, overwriteExisting)) {
+                if (createOnlyUser) {
+                    if (detailedLog && !linkChanged) {
+                        logger.infof("DingTalk sync detail would leave create-only user unchanged. realm=%s, idp=%s, username=%s",
+                                realm.getName(), idp.getAlias(), user.getUsername());
+                    }
+                    continue;
+                }
+                boolean managedChanged = wouldMarkManagedUser(user, idp, dingtalkUser, corpId);
+                if (wouldApplyUserUpdates(user, dingtalkUser, corpId, syncFields, overwriteExisting)) {
                     updated++;
                 } else if (managedChanged) {
                     updated++;
                 } else if (detailedLog && !linkChanged) {
-                    logger.infof("DingTalk sync detail unchanged user. realm=%s, idp=%s, username=%s, syncFields=%s, overwriteExisting=%s",
+                    logger.infof("DingTalk sync detail would leave user unchanged. realm=%s, idp=%s, username=%s, syncFields=%s, overwriteExisting=%s",
                             realm.getName(), idp.getAlias(), user.getUsername(), syncFields, overwriteExisting);
                 }
+                continue;
             }
-        }
+            if (reenableUsers && isReenableCandidate(user, createdThisSync)) {
+                try {
+                    user.setEnabled(true);
+                    try {
+                        user.removeAttribute(DINGTALK_DISABLED_REASON);
+                    } catch (ReadOnlyException e) {
+                        logger.warnf("Re-enabled DingTalk user but could not remove disable reason. realm=%s, idp=%s, username=%s, reason=%s",
+                                realm.getName(), idp.getAlias(), user.getUsername(), e.getMessage());
+                    }
+                    reenabled++;
+                    logger.infof("DingTalk sync re-enabled user. realm=%s, idp=%s, username=%s",
+                            realm.getName(), idp.getAlias(), user.getUsername());
+                } catch (ReadOnlyException e) {
+                    logger.warnf("Skip re-enabling read-only user during DingTalk sync. realm=%s, idp=%s, username=%s, reason=%s",
+                            realm.getName(), idp.getAlias(), user.getUsername(), e.getMessage());
+                }
+            }
 
-        if (!dryRun && disableMissingUsers && allDepartmentsLoaded && !activeExternalIds.isEmpty()) {
-            disabled = disableMissingManagedUsers(session, realm, idp, activeExternalIds);
-        } else if (dryRun && disableMissingUsers && allDepartmentsLoaded && !activeExternalIds.isEmpty()) {
-            disabled = findMissingManagedUsers(session, realm, idp, activeExternalIds).size();
-        } else if (disableMissingUsers && !allDepartmentsLoaded) {
-            logger.warnf("Skip disabling missing DingTalk users because at least one department failed to load. realm=%s, idp=%s",
-                    realm.getName(), idp.getAlias());
+            boolean linkChanged = false;
+            try {
+                linkChanged = bindFederatedIdentityIfMissing(session, realm, idp, user, dingtalkUser);
+            } catch (ReadOnlyException e) {
+                logger.warnf("Skip DingTalk federated identity binding for read-only user. realm=%s, idp=%s, username=%s, reason=%s",
+                        realm.getName(), idp.getAlias(), user.getUsername(), e.getMessage());
+            }
+            if (linkChanged) {
+                linked++;
+            }
+            if (createOnlyUser) {
+                if (detailedLog && !linkChanged) {
+                    logger.infof("DingTalk sync detail unchanged create-only user. realm=%s, idp=%s, username=%s",
+                            realm.getName(), idp.getAlias(), user.getUsername());
+                }
+                continue;
+            }
+            boolean managedChanged = markManagedUser(user, realm.getName(), idp, dingtalkUser, corpId, now);
+            if (applyUserUpdates(user, realm.getName(), idp.getAlias(), dingtalkUser, corpId, syncFields, overwriteExisting)) {
+                updated++;
+            } else if (managedChanged) {
+                updated++;
+            } else if (detailedLog && !linkChanged) {
+                logger.infof("DingTalk sync detail unchanged user. realm=%s, idp=%s, username=%s, syncFields=%s, overwriteExisting=%s",
+                        realm.getName(), idp.getAlias(), user.getUsername(), syncFields, overwriteExisting);
+            }
         }
 
         if (!dryRun) {
@@ -554,10 +618,11 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                                                  DingTalkWebhookNotifier.Batch notifications) {
         String username = resolveProvisionedUsername(dingtalkUser);
         String describedUser = describeDingTalkUser(dingtalkUser);
+        String notificationUser = describeDingTalkUserForNotification(dingtalkUser);
         if (StringUtils.isBlank(username)) {
             logger.warnf("Skip creating Keycloak user from DingTalk: username is empty. realm=%s, idp=%s, dingtalkUser=%s",
                     realm.getName(), idp.getAlias(), describedUser);
-            notifications.addSkippedCreate("", "username is empty", describedUser);
+            notifications.addSkippedCreate("", "username is empty", notificationUser);
             return Optional.empty();
         }
 
@@ -565,31 +630,71 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         if (existing != null) {
             logger.warnf("Skip creating Keycloak user from DingTalk: username already exists and no trusted match was found. realm=%s, username=%s, dingtalkUser=%s",
                     realm.getName(), username, describedUser);
-            notifications.addSkippedCreate(username, "username already exists and no trusted match", describedUser);
+            notifications.addSkippedCreate(username, "username already exists and no trusted match", notificationUser);
             return Optional.empty();
         }
 
-        UserModel user = session.users().addUser(realm, username);
-        user.setEnabled(true);
-        user.setEmailVerified(Boolean.TRUE.equals(idp.isTrustEmail()));
-        putAttribute(user, DINGTALK_USER_ID, dingtalkUser.getUserId(), true);
-        putAttribute(user, DINGTALK_CREATED_BY_SYNC, "true", true);
-        if (StringUtils.isNotBlank(dingtalkUser.getEmail())) {
-            user.setEmail(dingtalkUser.getEmail());
-        }
-        if (StringUtils.isNotBlank(dingtalkUser.getNick())) {
-            user.setFirstName(dingtalkUser.getNick());
-            user.setSingleAttribute(NICK_NAME, dingtalkUser.getNick());
-        }
+        ProvisioningName provisioningName = resolveProvisioningName(dingtalkUser.getNick());
+        String provisionedEmail = resolveProvisionedEmail(idp.getConfig(), username, dingtalkUser.getEmail());
         String mobile = DingTalkIdentityProvider.formatMobile(dingtalkUser.getMobile());
-        if (StringUtils.isNotBlank(mobile)) {
-            user.setSingleAttribute(PHONE_NUMBER, mobile);
-        }
+        UserModel user = createProvisionedUser(session, realm, idp, username, provisioningName,
+                provisionedEmail, mobile, dingtalkUser);
+        // Keep LDAP-mapped profile fields create-only in this transaction. Only the
+        // Keycloak email verification flag is set post-create, matching the admin
+        // REST creation path without adding another LDAP-mapped profile update.
 
         logger.infof("Created Keycloak user from DingTalk. realm=%s, username=%s",
                 realm.getName(), user.getUsername());
-        notifications.addCreatedUser(user.getUsername(), describedUser);
+        notifications.addCreatedUser(user.getUsername(), notificationUser);
+        DingTalkCreatedUserInitializer.initializeAfterCommit(session, realm, idp, user.getUsername());
         return Optional.of(new ProvisionResult(user, true, "created"));
+    }
+
+    private UserModel createProvisionedUser(KeycloakSession session, RealmModel realm, IdentityProviderModel idp,
+                                            String username, ProvisioningName provisioningName,
+                                            String provisionedEmail, String mobile, UserDto dingtalkUser) {
+        UserProfileProvider profileProvider = session.getProvider(UserProfileProvider.class);
+        if (profileProvider == null) {
+            throw new IllegalStateException("UserProfileProvider is not available");
+        }
+
+        Map<String, List<String>> rawAttributes = buildProvisioningRawAttributes(
+                username, provisioningName, provisionedEmail, mobile, dingtalkUser);
+        UserProfile profile = profileProvider.create(UserProfileContext.USER_API, rawAttributes);
+        profile.validate();
+        UserModel user = profile.create();
+        // This flag is a dedicated UserModel property, not a UserProfile raw attribute.
+        user.setEmailVerified(true);
+        logger.debugf("Created DingTalk provisioned user through UserProfile. realm=%s, idp=%s, username=%s, rawAttributeNames=%s",
+                realm.getName(), idp.getAlias(), username, rawAttributes.keySet());
+        return user;
+    }
+
+    static Map<String, List<String>> buildProvisioningRawAttributes(String username, ProvisioningName provisioningName,
+                                                                    String provisionedEmail, String mobile,
+                                                                    UserDto dingtalkUser) {
+        Map<String, List<String>> rawAttributes = new LinkedHashMap<>();
+        addRawAttribute(rawAttributes, UserModel.USERNAME, username);
+        addRawAttribute(rawAttributes, UserModel.EMAIL, provisionedEmail);
+        if (provisioningName != null) {
+            addRawAttribute(rawAttributes, UserModel.FIRST_NAME, provisioningName.firstName());
+            addRawAttribute(rawAttributes, UserModel.LAST_NAME, provisioningName.lastName());
+            addRawAttribute(rawAttributes, NICK_NAME, provisioningName.displayName());
+        }
+        if (dingtalkUser != null) {
+            addRawAttribute(rawAttributes, DINGTALK_USER_ID, dingtalkUser.getUserId());
+        }
+        if (StringUtils.isNotBlank(mobile)) {
+            addRawAttribute(rawAttributes, PHONE_NUMBER, mobile);
+        }
+        return rawAttributes;
+    }
+
+    private static void addRawAttribute(Map<String, List<String>> rawAttributes, String name, String value) {
+        if (StringUtils.isBlank(name) || StringUtils.isBlank(value)) {
+            return;
+        }
+        rawAttributes.put(name, List.of(value.trim()));
     }
 
     static String resolveProvisionedUsername(UserDto dingtalkUser) {
@@ -608,6 +713,42 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                 .map(value -> value.toLowerCase(Locale.ROOT))
                 .findFirst()
                 .orElse(null);
+    }
+
+    static String resolveProvisionedEmail(Map<String, String> config, String username, String fallbackEmail) {
+        String configuredDomain = config == null ? null : config.get(PROVISIONED_EMAIL_DOMAIN);
+        String domain = normalizeProvisionedEmailDomain(configuredDomain);
+        if (StringUtils.isNotBlank(configuredDomain) && StringUtils.isBlank(domain)) {
+            throw new IllegalArgumentException("Invalid provisionedEmailDomain: " + configuredDomain);
+        }
+        if (StringUtils.isBlank(domain) || StringUtils.isBlank(username)) {
+            String email = StringUtils.trimToNull(fallbackEmail);
+            return email == null ? null : email.toLowerCase(Locale.ROOT);
+        }
+        return username.trim().toLowerCase(Locale.ROOT) + "@" + domain;
+    }
+
+    static String normalizeProvisionedEmailDomain(String configuredDomain) {
+        if (StringUtils.isBlank(configuredDomain)) {
+            return null;
+        }
+        String domain = configuredDomain.trim();
+        while (domain.startsWith("@")) {
+            domain = domain.substring(1).trim();
+        }
+        domain = domain.toLowerCase(Locale.ROOT);
+        if (StringUtils.isBlank(domain) || domain.contains("@") || StringUtils.containsWhitespace(domain)) {
+            return null;
+        }
+        return domain;
+    }
+
+    static ProvisioningName resolveProvisioningName(String nickname) {
+        String displayName = StringUtils.trimToNull(nickname);
+        if (displayName == null) {
+            return ProvisioningName.empty();
+        }
+        return new ProvisioningName(displayName, null, displayName);
     }
 
     private MatchResult findMatchedUserByRule(KeycloakSession session, RealmModel realm,
@@ -722,19 +863,21 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         return true;
     }
 
-    private boolean markManagedUser(UserModel user, IdentityProviderModel idp, UserDto dingtalkUser,
-                                    String corpId, long syncTimestamp) {
+    boolean markManagedUser(UserModel user, String realmName, IdentityProviderModel idp, UserDto dingtalkUser,
+                            String corpId, long syncTimestamp) {
         boolean changed = false;
-        changed |= putAttribute(user, DINGTALK_MANAGED, "true", true);
-        changed |= putAttribute(user, DINGTALK_IDP_ALIAS, idp.getAlias(), true);
-        changed |= putAttribute(user, DINGTALK_EXTERNAL_ID, resolveExternalId(dingtalkUser), true);
-        putAttribute(user, DINGTALK_LAST_SYNC, String.valueOf(syncTimestamp), true);
-        putAttribute(user, DINGTALK_LAST_SYNC_AT, formatBeijingTime(syncTimestamp), true);
-        changed |= putAttribute(user, DINGTALK_USER_ID, dingtalkUser.getUserId(), true);
-        changed |= putAttribute(user, UNION_ID, dingtalkUser.getUnionId(), true);
-        changed |= putAttribute(user, OPEN_ID, dingtalkUser.getOpenId(), true);
-        changed |= putAttribute(user, CORP_ID, corpId, true);
-        changed |= putAttribute(user, NICK_NAME, dingtalkUser.getNick(), true);
+        try {
+            changed |= putAttribute(user, DINGTALK_MANAGED, "true", true);
+            changed |= putAttribute(user, DINGTALK_IDP_ALIAS, idp.getAlias(), true);
+            changed |= putAttribute(user, DINGTALK_EXTERNAL_ID, resolveExternalId(dingtalkUser), true);
+            putAttribute(user, DINGTALK_LAST_SYNC, String.valueOf(syncTimestamp), true);
+            putAttribute(user, DINGTALK_LAST_SYNC_AT, formatBeijingTime(syncTimestamp), true);
+            changed |= putDingTalkIdentityAttributes(user, dingtalkUser, corpId);
+            changed |= putAttribute(user, NICK_NAME, dingtalkUser.getNick(), true);
+        } catch (ReadOnlyException e) {
+            logger.warnf("Skip DingTalk metadata writes for read-only user. realm=%s, idp=%s, username=%s, reason=%s",
+                    realmName, idp.getAlias(), user.getUsername(), e.getMessage());
+        }
         return changed;
     }
 
@@ -751,29 +894,133 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     }
 
     private int disableMissingManagedUsers(KeycloakSession session, RealmModel realm, IdentityProviderModel idp,
-                                           Set<String> activeExternalIds) {
+                                           ActiveDingTalkUsers activeUsers, boolean includeExternalUsers,
+                                           DingTalkWebhookNotifier.Batch notifications) {
         int disabled = 0;
-        for (UserModel user : findMissingManagedUsers(session, realm, idp, activeExternalIds)) {
-            user.setEnabled(false);
-            putAttribute(user, DINGTALK_DISABLED_REASON, "missing_from_dingtalk", true);
-            disabled++;
-            logger.infof("Disabled Keycloak user missing from DingTalk. realm=%s, username=%s",
-                    realm.getName(), user.getUsername());
+        for (UserModel user : findMissingManagedUsers(session, realm, idp, activeUsers, includeExternalUsers)) {
+            try {
+                user.setEnabled(false);
+                disabled++;
+                try {
+                    putAttribute(user, DINGTALK_DISABLED_REASON, DINGTALK_DISABLED_REASON_MISSING, true);
+                } catch (ReadOnlyException e) {
+                    logger.warnf("Disabled user missing from DingTalk but could not write disable reason. realm=%s, idp=%s, username=%s, reason=%s",
+                            realm.getName(), idp.getAlias(), user.getUsername(), e.getMessage());
+                }
+                logger.infof("Disabled Keycloak user missing from DingTalk. realm=%s, username=%s",
+                        realm.getName(), user.getUsername());
+                notifications.addDisabledUser(user.getUsername(), DINGTALK_DISABLED_REASON_MISSING);
+            } catch (ReadOnlyException e) {
+                logger.warnf("Skip disabling read-only user missing from DingTalk. realm=%s, idp=%s, username=%s, reason=%s",
+                        realm.getName(), idp.getAlias(), user.getUsername(), e.getMessage());
+            }
         }
         return disabled;
     }
 
-    private List<UserModel> findMissingManagedUsers(KeycloakSession session, RealmModel realm, IdentityProviderModel idp,
-                                                    Set<String> activeExternalIds) {
-        return session.users()
-                .searchForUserByUserAttributeStream(realm, DINGTALK_IDP_ALIAS, idp.getAlias())
-                .filter(user -> "true".equals(user.getFirstAttribute(DINGTALK_MANAGED)))
-                .filter(UserModel::isEnabled)
-                .filter(user -> {
-                    String externalId = resolveManagedExternalId(user);
-                    return StringUtils.isNotBlank(externalId) && !activeExternalIds.contains(externalId);
-                })
-                .toList();
+    List<UserModel> findMissingManagedUsers(KeycloakSession session, RealmModel realm, IdentityProviderModel idp,
+                                            ActiveDingTalkUsers activeUsers, boolean includeExternalUsers) {
+        Map<String, UserModel> candidates = new LinkedHashMap<>();
+        try (Stream<UserModel> managedUsers = session.users()
+                .searchForUserByUserAttributeStream(realm, DINGTALK_IDP_ALIAS, idp.getAlias())) {
+            managedUsers
+                    .filter(UserModel::isEnabled)
+                    .filter(user -> isMissingKnownDingTalkUser(session, realm, user, idp.getAlias(), activeUsers))
+                    .forEach(user -> candidates.put(candidateKey(user), user));
+        }
+
+        if (includeExternalUsers && isExternalUserFullScanAllowed(realm, idp)) {
+            try (Stream<UserModel> externalUsers = session.users().searchForUserStream(realm, Map.of())) {
+                externalUsers
+                        .filter(UserModel::isEnabled)
+                        .filter(user -> isMissingLinkedUser(session, realm, user, idp.getAlias(), activeUsers)
+                                || isMissingExternalStorageUser(session, realm, user, idp.getAlias(), activeUsers))
+                        .forEach(user -> candidates.put(candidateKey(user), user));
+            }
+        }
+
+        return new ArrayList<>(candidates.values());
+    }
+
+    private boolean isExternalUserFullScanAllowed(RealmModel realm, IdentityProviderModel idp) {
+        List<ComponentModel> userStorageProviders;
+        try (Stream<ComponentModel> providers = realm.getStorageProviders(UserStorageProvider.class)) {
+            userStorageProviders = providers.toList();
+        } catch (RuntimeException e) {
+            logger.warnf(e, "Skip DingTalk external missing-user scan because user storage provider configuration cannot be inspected. realm=%s, idp=%s",
+                    realm.getName(), idp.getAlias());
+            return false;
+        }
+
+        for (ComponentModel provider : userStorageProviders) {
+            UserStorageProviderModel storageProvider = new UserStorageProviderModel(provider);
+            if (storageProvider.isRemoveInvalidUsersEnabled()) {
+                logger.warnf("Skip DingTalk external missing-user scan because user storage provider has removeInvalidUsersEnabled=true. realm=%s, idp=%s, provider=%s",
+                        realm.getName(), idp.getAlias(), provider.getName());
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean isReenableCandidate(UserModel user, boolean createdThisSync) {
+        return user != null
+                && !createdThisSync
+                && !user.isEnabled()
+                && DINGTALK_DISABLED_REASON_MISSING.equals(user.getFirstAttribute(DINGTALK_DISABLED_REASON));
+    }
+
+    private boolean isMissingKnownDingTalkUser(KeycloakSession session, RealmModel realm, UserModel user,
+                                               String idpAlias, ActiveDingTalkUsers activeUsers) {
+        if (activeUsers.matchesUser(user)) {
+            return false;
+        }
+        if ("true".equals(user.getFirstAttribute(DINGTALK_MANAGED)) && isMissingManagedUser(user, activeUsers)) {
+            return true;
+        }
+        return isMissingLinkedUser(session, realm, user, idpAlias, activeUsers);
+    }
+
+    private boolean isMissingManagedUser(UserModel user, ActiveDingTalkUsers activeUsers) {
+        String externalId = resolveManagedExternalId(user);
+        return StringUtils.isNotBlank(externalId) && !activeUsers.hasExternalId(externalId);
+    }
+
+    private boolean isMissingLinkedUser(KeycloakSession session, RealmModel realm, UserModel user,
+                                        String idpAlias, ActiveDingTalkUsers activeUsers) {
+        FederatedIdentityModel identity = session.users().getFederatedIdentity(realm, user, idpAlias);
+        return identity != null
+                && StringUtils.isNotBlank(identity.getUserId())
+                && !activeUsers.hasExternalId(identity.getUserId());
+    }
+
+    private boolean isMissingExternalStorageUser(KeycloakSession session, RealmModel realm, UserModel user,
+                                                 String idpAlias, ActiveDingTalkUsers activeUsers) {
+        if (!isExternalStorageDisableCandidate(user)) {
+            return false;
+        }
+        FederatedIdentityModel identity = session.users().getFederatedIdentity(realm, user, idpAlias);
+        if (identity != null && activeUsers.hasExternalId(identity.getUserId())) {
+            return false;
+        }
+        return !activeUsers.matchesUser(user);
+    }
+
+    private boolean isExternalStorageDisableCandidate(UserModel user) {
+        if (StringUtils.isBlank(user.getFederationLink())) {
+            return false;
+        }
+        if (StringUtils.isNotBlank(user.getServiceAccountClientLink())) {
+            return false;
+        }
+        String username = StringUtils.trimToEmpty(user.getUsername());
+        // AD computer accounts use sAMAccountName ending in "$"; they are not employee accounts.
+        return !username.endsWith("$");
+    }
+
+    private String candidateKey(UserModel user) {
+        String id = user.getId();
+        return StringUtils.isNotBlank(id) ? id : user.getUsername();
     }
 
     private String resolveManagedExternalId(UserModel user) {
@@ -790,27 +1037,35 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                 .orElse(null);
     }
 
-    private boolean applyUserUpdates(UserModel user, UserDto dingtalkUser, String corpId,
-                                     Set<String> syncFields, boolean overwriteExisting) {
+    boolean applyUserUpdates(UserModel user, String realmName, String idpAlias, UserDto dingtalkUser, String corpId,
+                             Set<String> syncFields, boolean overwriteExisting) {
         boolean changed = false;
         List<String> changedFields = new java.util.ArrayList<>();
 
         String mobile = DingTalkIdentityProvider.formatMobile(dingtalkUser.getMobile());
-        if (syncFields.contains("phone") && putAttribute(user, PHONE_NUMBER, mobile, overwriteExisting)) {
+        if (syncFields.contains("phone")
+                && putUserSyncAttribute(user, realmName, idpAlias, PHONE_NUMBER, mobile, overwriteExisting)) {
             changed = true;
             changedFields.add(PHONE_NUMBER);
         }
         if (syncFields.contains("email")
                 && StringUtils.isNotBlank(dingtalkUser.getEmail())
                 && (overwriteExisting || StringUtils.isBlank(user.getEmail()))) {
-            user.setEmail(dingtalkUser.getEmail());
-            changed = true;
-            changedFields.add("email");
+            try {
+                user.setEmail(dingtalkUser.getEmail());
+                changed = true;
+                changedFields.add("email");
+            } catch (ReadOnlyException e) {
+                logger.warnf("Skip DingTalk sync field write for read-only user. realm=%s, idp=%s, username=%s, field=email, reason=%s",
+                        realmName, idpAlias, user.getUsername(), e.getMessage());
+            }
         }
-        changed |= putAttribute(user, DINGTALK_USER_ID, dingtalkUser.getUserId(), true);
-        changed |= putAttribute(user, UNION_ID, dingtalkUser.getUnionId(), true);
-        changed |= putAttribute(user, OPEN_ID, dingtalkUser.getOpenId(), true);
-        changed |= putAttribute(user, CORP_ID, corpId, true);
+        try {
+            changed |= putDingTalkIdentityAttributes(user, dingtalkUser, corpId);
+        } catch (ReadOnlyException e) {
+            logger.warnf("Skip DingTalk identity metadata writes for read-only user. realm=%s, idp=%s, username=%s, reason=%s",
+                    realmName, idpAlias, user.getUsername(), e.getMessage());
+        }
 
         if (!changedFields.isEmpty()) {
             logger.infof("DingTalk sync updated user fields. username=%s, fields=%s",
@@ -832,7 +1087,49 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                 || wouldPutAttribute(user, CORP_ID, corpId, true);
     }
 
-    private boolean putAttribute(UserModel user, String attributeName, String value, boolean overwriteExisting) {
+    static boolean markUsernameLocked(UserModel user, String realmName, String idpAlias,
+                                      String username, String source) {
+        if (user == null) {
+            return false;
+        }
+        String resolvedUsername = StringUtils.defaultIfBlank(username, user.getUsername());
+        boolean changed = false;
+        try {
+            changed |= putAttribute(user, DINGTALK_USERNAME_LOCKED, "true", true);
+            changed |= putAttribute(user, DINGTALK_USERNAME_SOURCE,
+                    StringUtils.defaultIfBlank(source, USERNAME_SOURCE_AUTO_PINYIN), true);
+            changed |= putAttribute(user, DINGTALK_USERNAME_SUGGESTED, resolvedUsername, true);
+        } catch (ReadOnlyException e) {
+            logger.warnf("Skip DingTalk username lock metadata writes for read-only user. realm=%s, idp=%s, username=%s, reason=%s",
+                    realmName, idpAlias, user.getUsername(), e.getMessage());
+        }
+        return changed;
+    }
+
+    static boolean shouldKeepCreateOnly(UserModel user, String matchSource, UserDto dingtalkUser,
+                                        boolean createdThisSync) {
+        if (createdThisSync) {
+            return true;
+        }
+        if (user == null || !"linked-identity".equals(matchSource)) {
+            return false;
+        }
+        if ("true".equalsIgnoreCase(user.getFirstAttribute(DINGTALK_MANAGED))) {
+            return false;
+        }
+
+        String dingtalkUserId = dingtalkUser == null ? null : dingtalkUser.getUserId();
+        if (StringUtils.isNotBlank(dingtalkUserId)
+                && dingtalkUserId.equals(user.getFirstAttribute(DINGTALK_USER_ID))) {
+            return true;
+        }
+
+        String provisionedUsername = resolveProvisionedUsername(dingtalkUser);
+        return StringUtils.isNotBlank(provisionedUsername)
+                && StringUtils.equalsIgnoreCase(provisionedUsername, user.getUsername());
+    }
+
+    private static boolean putAttribute(UserModel user, String attributeName, String value, boolean overwriteExisting) {
         if (StringUtils.isBlank(value)) {
             return false;
         }
@@ -856,6 +1153,80 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             return false;
         }
         return !value.equals(current);
+    }
+
+    private boolean putUserSyncAttribute(UserModel user, String realmName, String idpAlias, String attributeName,
+                                         String value, boolean overwriteExisting) {
+        try {
+            return putAttribute(user, attributeName, value, overwriteExisting);
+        } catch (ReadOnlyException e) {
+            logger.warnf("Skip DingTalk sync field write for read-only user. realm=%s, idp=%s, username=%s, field=%s, reason=%s",
+                    realmName, idpAlias, user.getUsername(), attributeName, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean putDingTalkIdentityAttributes(UserModel user, UserDto dingtalkUser, String corpId) {
+        boolean changed = false;
+        changed |= putAttribute(user, DINGTALK_USER_ID, dingtalkUser.getUserId(), true);
+        changed |= putAttribute(user, UNION_ID, dingtalkUser.getUnionId(), true);
+        changed |= putAttribute(user, OPEN_ID, dingtalkUser.getOpenId(), true);
+        changed |= putAttribute(user, CORP_ID, corpId, true);
+        return changed;
+    }
+
+    final class ActiveDingTalkUsers {
+        private final Set<String> externalIds = new HashSet<>();
+        private final Set<String> usernames = new HashSet<>();
+        private final Set<String> emails = new HashSet<>();
+        private final Set<String> phones = new HashSet<>();
+
+        void add(UserDto dingtalkUser) {
+            addValue(externalIds, resolveExternalId(dingtalkUser));
+            usernameCandidates(dingtalkUser).forEach(username -> addValue(usernames, username));
+            addValue(emails, normalizeEmail(dingtalkUser.getEmail()));
+            addValue(phones, DingTalkIdentityProvider.formatMobile(dingtalkUser.getMobile()));
+        }
+
+        boolean hasAnyIdentity() {
+            return !externalIds.isEmpty() || !usernames.isEmpty() || !emails.isEmpty() || !phones.isEmpty();
+        }
+
+        boolean hasExternalId(String externalId) {
+            return StringUtils.isNotBlank(externalId)
+                    && externalIds.contains(externalId.trim().toLowerCase(Locale.ROOT));
+        }
+
+        boolean matchesUser(UserModel user) {
+            if (user == null) {
+                return false;
+            }
+            if (StringUtils.isNotBlank(user.getUsername())
+                    && usernames.contains(user.getUsername().trim().toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+            if (StringUtils.isNotBlank(user.getEmail()) && emails.contains(normalizeEmail(user.getEmail()))) {
+                return true;
+            }
+            for (String attributeName : PHONE_ATTRIBUTE_NAMES) {
+                String phone = DingTalkIdentityProvider.formatMobile(user.getFirstAttribute(attributeName));
+                if (StringUtils.isNotBlank(phone) && phones.contains(phone)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void addValue(Set<String> values, String value) {
+            String normalized = StringUtils.trimToNull(value);
+            if (normalized != null) {
+                values.add(normalized.toLowerCase(Locale.ROOT));
+            }
+        }
+
+        private static String normalizeEmail(String email) {
+            return StringUtils.isBlank(email) ? null : email.trim().toLowerCase(Locale.ROOT);
+        }
     }
 
     private Optional<UserModel> findUniqueByEmail(KeycloakSession session, RealmModel realm,
@@ -930,6 +1301,16 @@ public class DingTalkUserSyncTask implements ScheduledTask {
                 StringUtils.isNotBlank(userDto.getEmail()));
     }
 
+    private String describeDingTalkUserForNotification(UserDto userDto) {
+        return String.format(
+                "userId=%s, externalId=%s, nickname=%s, hasPhone=%s, hasEmail=%s",
+                DingTalkIdentityProvider.mask(userDto.getUserId()),
+                DingTalkIdentityProvider.mask(resolveExternalId(userDto)),
+                StringUtils.defaultString(userDto.getNick()),
+                StringUtils.isNotBlank(DingTalkIdentityProvider.formatMobile(userDto.getMobile())),
+                StringUtils.isNotBlank(userDto.getEmail()));
+    }
+
     private List<String> usernameCandidates(UserDto userDto) {
         return Arrays.asList(emailPrefix(userDto.getEmail()), DingTalkIdentityProvider.resolveUsername(userDto))
                 .stream()
@@ -958,9 +1339,37 @@ public class DingTalkUserSyncTask implements ScheduledTask {
         return config != null && Boolean.parseBoolean(config.getOrDefault(PERIODIC_SYNC_CREATE_USERS, "false"));
     }
 
+    static RealmModel resolveRealmAndBindContext(KeycloakSession session, String realmId) {
+        if (session == null || StringUtils.isBlank(realmId)) {
+            return null;
+        }
+
+        RealmModel realm = session.realms().getRealm(realmId);
+        if (realm != null && session.getContext() != null) {
+            session.getContext().setRealm(realm);
+        }
+        return realm;
+    }
+
+    private static List<String> distinctUsernames(List<String> usernames) {
+        if (usernames == null || usernames.isEmpty()) {
+            return List.of();
+        }
+        return usernames.stream()
+                .map(StringUtils::trimToNull)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .toList();
+    }
+
     static boolean isDisableMissingUsersEnabled(Map<String, String> config) {
         return config != null
                 && Boolean.parseBoolean(config.getOrDefault(PERIODIC_SYNC_DISABLE_MISSING_USERS, "false"));
+    }
+
+    static boolean isDisableExternalUsersEnabled(Map<String, String> config) {
+        return config != null
+                && Boolean.parseBoolean(config.getOrDefault(PERIODIC_SYNC_DISABLE_EXTERNAL_USERS, "false"));
     }
 
     static boolean isReenableUsersEnabled(Map<String, String> config) {
@@ -1058,6 +1467,12 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     private record DepartmentUsers(List<UserDto> users, boolean successful) {
     }
 
+    record ProvisioningName(String firstName, String lastName, String displayName) {
+        static ProvisioningName empty() {
+            return new ProvisioningName(null, null, null);
+        }
+    }
+
     record SyncResult(String alias, int listed, int matched, int created, int linked, int updated,
                       int reenabled, int disabled, boolean skipped, String reason) {
         static SyncResult empty(String alias) {
@@ -1068,7 +1483,30 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             return new SyncResult(alias, 0, 0, 0, 0, 0, 0, 0, true, reason);
         }
 
-        SyncResult plus(SyncResult other) {
+        static SyncResult aggregate(String alias, List<SyncResult> results) {
+            if (results == null || results.isEmpty()) {
+                return empty(alias);
+            }
+            SyncResult total = empty(alias);
+            boolean allSkipped = true;
+            for (SyncResult result : results) {
+                total = total.plus(result);
+                allSkipped &= result.skipped;
+            }
+            return new SyncResult(
+                    alias,
+                    total.listed,
+                    total.matched,
+                    total.created,
+                    total.linked,
+                    total.updated,
+                    total.reenabled,
+                    total.disabled,
+                    allSkipped,
+                    allSkipped ? total.reason : null);
+        }
+
+        private SyncResult plus(SyncResult other) {
             return new SyncResult(
                     alias,
                     listed + other.listed,

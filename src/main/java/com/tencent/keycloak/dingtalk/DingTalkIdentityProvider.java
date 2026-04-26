@@ -47,6 +47,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.storage.ReadOnlyException;
 
 /**
  * 钉钉登录集成Provider
@@ -103,6 +104,10 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
             "appsecret", "mobile", "email", "phoneNumber", "userid", "userId",
             "unionid", "unionId", "openid", "openId", "name", "nick",
             "avatarUrl", "staffId");
+    private static final Pattern STANDALONE_EMAIL_PATTERN = Pattern.compile(
+            "(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b");
+    private static final Pattern MAINLAND_MOBILE_PATTERN = Pattern.compile(
+            "(?<!\\d)(?:\\+?86[-\\s]?)?1[3-9]\\d{9}(?!\\d)");
 
     public DingTalkIdentityProvider(KeycloakSession session, OAuth2IdentityProviderConfig config) {
         super(session, config);
@@ -251,7 +256,6 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         context.setUsername(resolveBrokerUsername(userDto, username));
         if (StringUtils.isNotBlank(userDto.getNick())) {
             context.setName(userDto.getNick());
-            context.setFirstName(userDto.getNick());
         }
 
         // 设置用户属性
@@ -362,6 +366,8 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         if (StringUtils.isBlank(context.getModelUsername())) {
             throw new IdentityBrokerException("DingTalk login rejected: username cannot be resolved from nickname or email");
         }
+        context.setEmail(DingTalkUserSyncTask.resolveProvisionedEmail(
+                config, context.getModelUsername(), context.getEmail()));
     }
 
     private Optional<UserModel> findLinkedUser(KeycloakSession session, RealmModel realm,
@@ -391,22 +397,28 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         super.importNewUser(session, realm, user, context);
         
         logger.infof("Importing new DingTalk user: %s", user.getUsername());
-        
+
         syncDingTalkIdentityAttributes(user, context);
 
         // 设置用户属性
         String nickname = context.getUserAttribute(NICK_NAME);
         if (StringUtils.isNotBlank(nickname)) {
-            user.setSingleAttribute(NICK_NAME, nickname);
+            setAttributeIfPresent(user, NICK_NAME, nickname);
         }
         
         String phoneNumber = context.getUserAttribute(PHONE_NUMBER);
         if (StringUtils.isNotBlank(phoneNumber)) {
-            user.setSingleAttribute(PHONE_NUMBER, phoneNumber);
+            setAttributeIfPresent(user, PHONE_NUMBER, phoneNumber);
         }
-        
+
         // 按配置分配当前企业对应的 ent-member 和 ent-plugin-enabled 角色
         grantEnterpriseRoles(realm, user, context);
+        DingTalkUserSyncTask.markUsernameLocked(
+                user,
+                realm.getName(),
+                context.getIdpConfig().getAlias(),
+                user.getUsername(),
+                DingTalkUserSyncTask.USERNAME_SOURCE_LOGIN_AUTO_PINYIN);
 
         DingTalkWebhookNotifier.notifyLoginUserCreated(
                 session,
@@ -415,6 +427,7 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
                 user,
                 context.getId(),
                 context.getUserAttribute(DINGTALK_USER_ID),
+                context.getUserAttribute(NICK_NAME),
                 StringUtils.isNotBlank(context.getUserAttribute(PHONE_NUMBER)),
                 StringUtils.isNotBlank(context.getEmail()));
         
@@ -438,20 +451,18 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         }
 
         // 更新邮箱
-        if (StringUtils.isNotBlank(context.getEmail())) {
-            user.setEmail(context.getEmail());
-        }
+        setEmailIfPresent(user, context.getEmail());
 
         // 更新昵称
         String nickname = context.getUserAttribute(NICK_NAME);
         if (StringUtils.isNotBlank(nickname)) {
-            user.setSingleAttribute(NICK_NAME, nickname);
+            setAttributeIfPresent(user, NICK_NAME, nickname);
         }
 
         // 更新手机号
         String phoneNumber = context.getUserAttribute(PHONE_NUMBER);
         if (StringUtils.isNotBlank(phoneNumber)) {
-            user.setSingleAttribute(PHONE_NUMBER, phoneNumber);
+            setAttributeIfPresent(user, PHONE_NUMBER, phoneNumber);
         }
 
         // 分配当前企业对应的 ent-member 角色和设置用户属性（与飞书/企业微信保持一致）
@@ -467,12 +478,34 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         setAttributeIfPresent(user, CORP_ID, context.getUserAttribute(CORP_ID));
     }
 
-    private void setAttributeIfPresent(UserModel user, String attributeName, String value) {
+    private boolean setAttributeIfPresent(UserModel user, String attributeName, String value) {
         if (StringUtils.isBlank(value)) {
-            return;
+            return false;
         }
         if (!value.equals(user.getFirstAttribute(attributeName))) {
-            user.setSingleAttribute(attributeName, value);
+            try {
+                user.setSingleAttribute(attributeName, value);
+                return true;
+            } catch (ReadOnlyException e) {
+                logger.warnf("Skip DingTalk login attribute write for read-only user. username=%s, field=%s, reason=%s",
+                        user.getUsername(), attributeName, e.getMessage());
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private boolean setEmailIfPresent(UserModel user, String email) {
+        if (StringUtils.isBlank(email) || email.equalsIgnoreCase(StringUtils.defaultString(user.getEmail()))) {
+            return false;
+        }
+        try {
+            user.setEmail(email);
+            return true;
+        } catch (ReadOnlyException e) {
+            logger.warnf("Skip DingTalk login email write for read-only user. username=%s, reason=%s",
+                    user.getUsername(), e.getMessage());
+            return false;
         }
     }
 
@@ -492,8 +525,9 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
             return;
         }
 
-        user.setSingleAttribute(PHONE_NUMBER, phoneNumber);
-        logger.infof("Filled missing phoneNumber for user: %s", user.getUsername());
+        if (setAttributeIfPresent(user, PHONE_NUMBER, phoneNumber)) {
+            logger.infof("Filled missing phoneNumber for user: %s", user.getUsername());
+        }
     }
     
     /**
@@ -517,15 +551,15 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         }
 
         String providerId = context.getIdpConfig().getProviderId();
-        user.setSingleAttribute(ENT_USER_RESOURCE + enterpriseId, providerId);
+        setAttributeIfPresent(user, ENT_USER_RESOURCE + enterpriseId, providerId);
 
         String nickName = context.getUserAttribute(NICK_NAME);
         if (StringUtils.isNotBlank(nickName)) {
-            user.setSingleAttribute(ENT_USER_NAME + enterpriseId, nickName);
+            setAttributeIfPresent(user, ENT_USER_NAME + enterpriseId, nickName);
         }
 
         if (StringUtils.isBlank(user.getFirstAttribute(ENT_JOIN_TIMESTAMP + enterpriseId))) {
-            user.setSingleAttribute(ENT_JOIN_TIMESTAMP + enterpriseId,
+            setAttributeIfPresent(user, ENT_JOIN_TIMESTAMP + enterpriseId,
                     String.valueOf(System.currentTimeMillis() / 1000));
         }
 
@@ -1021,6 +1055,8 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
                     "(?i)(" + Pattern.quote(key) + "=)[^&\\s,}]+",
                     "$1***");
         }
+        sanitized = STANDALONE_EMAIL_PATTERN.matcher(sanitized).replaceAll("***");
+        sanitized = MAINLAND_MOBILE_PATTERN.matcher(sanitized).replaceAll("***");
         return sanitized;
     }
 

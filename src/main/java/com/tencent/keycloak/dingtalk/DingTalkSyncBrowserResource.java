@@ -114,7 +114,7 @@ public class DingTalkSyncBrowserResource {
             DingTalkUserSyncTask syncTask = new DingTalkUserSyncTask();
             DingTalkUserSyncTask.SyncResult result = dryRun
                     ? syncTask.previewProviderNow(session, realm, alias)
-                    : syncTask.syncProviderNow(session, realm, alias);
+                    : syncTask.syncProviderNow(session, realm, alias, "browser");
             return syncResultResponse(result, dryRun);
         } catch (Exception e) {
             logger.errorf(e, "DingTalk browser sync failed. realm=%s, idp=%s, dryRun=%s",
@@ -224,9 +224,7 @@ public class DingTalkSyncBrowserResource {
     }
 
     private void restorePreviousRealm(RealmModel previousRealm) {
-        if (previousRealm != null) {
-            session.getContext().setRealm(previousRealm);
-        }
+        session.getContext().setRealm(previousRealm);
     }
 
     private IdentityProviderModel getDingTalkProvider(RealmModel realm, String alias) {

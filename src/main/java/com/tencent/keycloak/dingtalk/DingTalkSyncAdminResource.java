@@ -150,7 +150,7 @@ public class DingTalkSyncAdminResource {
         try {
             session.getContext().setRealm(realm);
             DingTalkUserSyncTask.SyncResult result = new DingTalkUserSyncTask()
-                    .syncProviderNow(session, realm, alias);
+                    .syncProviderNow(session, realm, alias, getRequest ? "admin-get" : "admin-post");
 
             adminEvent.operation(OperationType.ACTION)
                     .resource(DingTalkSyncAdminResourceProviderFactory.PROVIDER_ID)
@@ -227,9 +227,7 @@ public class DingTalkSyncAdminResource {
     }
 
     private void restorePreviousRealm(RealmModel previousRealm) {
-        if (previousRealm != null) {
-            session.getContext().setRealm(previousRealm);
-        }
+        session.getContext().setRealm(previousRealm);
     }
 
     private IdentityProviderModel getDingTalkProvider(String alias) {
