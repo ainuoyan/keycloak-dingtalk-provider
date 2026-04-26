@@ -211,8 +211,8 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         // 新版 OAuth 接口有时只返回 openId/unionId，不返回手机号、邮箱或通讯录 userId。
         // 只要企业 corpId 可用且关键信息缺失，就补查企业通讯录接口并合并非空字段。
         if (StringUtils.isNotBlank(corpId) && needsCorpUserInfo(userDto)) {
-            logger.info("Trying corp internal API to complete DingTalk user info...");
-            userDto = mergeMissingUserInfo(userDto, getUserInfoByCorpApi(corpId));
+            logger.debug("Trying corp internal API to complete DingTalk user info");
+            userDto = mergeMissingUserInfo(userDto, getUserInfoByCorpApi(corpId, userDto));
         }
 
         // 最后尝试从 token 响应中获取信息
@@ -597,9 +597,9 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
     /**
      * 通过企业内部应用 API 获取用户信息
      * 
-     * 使用 OAuth token 响应中的 unionId → 企业接口获取 userId → 获取用户详情。
+     * 使用 OAuth token 或用户信息响应中的 unionId → 企业接口获取 userId → 获取用户详情。
      */
-    private UserDto getUserInfoByCorpApi(String corpId) {
+    private UserDto getUserInfoByCorpApi(String corpId, UserDto oauthUserInfo) {
         try {
             // 1. 获取企业 access_token
             String corpAccessToken = getCorpAccessToken();
@@ -611,12 +611,15 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
 
             UserTokenDto tokenDto = tokenResponseHolder.get();
             String unionId = tokenDto != null ? tokenDto.getUnionId() : null;
+            if (StringUtils.isBlank(unionId) && oauthUserInfo != null) {
+                unionId = oauthUserInfo.getUnionId();
+            }
             if (StringUtils.isBlank(unionId)) {
-                logger.warnf("Cannot query DingTalk corp API for corpId=%s: unionId is missing", mask(corpId));
+                logger.debugf("Skip DingTalk corp API for corpId=%s: unionId is missing", mask(corpId));
                 return null;
             }
 
-            logger.infof("Trying to get userId by unionId from token: %s", mask(unionId));
+            logger.debugf("Trying to get userId by unionId: %s", mask(unionId));
             String userId = getUserIdByUnionId(corpAccessToken, unionId);
             if (StringUtils.isBlank(userId)) {
                 logger.warn("Failed to get userId by any method");
@@ -628,7 +631,7 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
             return getUserDetailByUserId(corpAccessToken, userId);
 
         } catch (Exception e) {
-            logger.error("Failed to get user info by corp API", e);
+            logger.warn("Failed to get user info by corp API", e);
             return null;
         }
     }

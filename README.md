@@ -432,7 +432,31 @@ mvn clean package -DskipTests
 ls -lh dist/keycloak-dingtalk-provider.jar
 ```
 
-### 问题 3: OAuth 错误 "invalid_client"
+### 问题 3: 启动失败 "Streams.of(java.lang.Iterable)"
+
+**症状**：Keycloak 启动时报错：
+
+```text
+ERROR: 'java.util.stream.Stream org.apache.commons.lang3.stream.Streams.of(java.lang.Iterable)'
+```
+
+**原因**：`/opt/keycloak/providers` 里存在旧版或重复的 `commons-lang3`，或使用了包含 `commons-lang3` 的旧版插件 JAR，覆盖了 Keycloak 运行时自带版本。
+
+**解决方案**：
+
+```bash
+# 当前插件 JAR 不应包含 commons-lang3，下面命令正常应无输出
+jar tf dist/keycloak-dingtalk-provider.jar | grep 'org/apache/commons/lang3'
+
+# 检查 Keycloak providers 目录，删除独立 commons-lang3 或旧插件 JAR
+docker exec keycloak ls -lh /opt/keycloak/providers/
+
+# 替换为最新 JAR 后重新 build 并重启
+docker exec keycloak /opt/keycloak/bin/kc.sh build --verbose
+docker restart keycloak
+```
+
+### 问题 4: OAuth 错误 "invalid_client"
 
 **症状**：授权时钉钉返回错误
 
@@ -441,7 +465,7 @@ ls -lh dist/keycloak-dingtalk-provider.jar
 2. 确保没有多余的空格
 3. 重新配置 Keycloak IDP
 
-### 问题 4: 回调地址错误 "redirect_uri_mismatch"
+### 问题 5: 回调地址错误 "redirect_uri_mismatch"
 
 **症状**：授权后跳转失败
 
@@ -452,7 +476,7 @@ ls -lh dist/keycloak-dingtalk-provider.jar
 - ✅ 路径：`/realms/{realm}/broker/dingtalk/endpoint`
 - ❌ 末尾不要加多余的 `/`
 
-### 问题 5: 用户信息未同步
+### 问题 6: 用户信息未同步
 
 **症状**：登录成功但用户属性为空
 
