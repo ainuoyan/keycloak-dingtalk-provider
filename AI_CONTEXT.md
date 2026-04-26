@@ -183,7 +183,7 @@
 | `POST /cleanup-sync-created-users?alias={alias}&key={debugKey}` | dry-run 清理预览，不删除 |
 | `GET /test-webhook?alias={alias}&key={debugKey}` | 发送钉钉机器人测试消息 |
 
-后台 Identity Provider 配置页会显示一个固定的“接口地址页面模板”入口：`/realms/{realm}/dingtalk-sync/endpoints`。插件不能在启动阶段依赖当前请求 realm，也不应在 `postInit` 中回写 IdP 配置；实际地址必须在访问页面时由 `/realms/<realm>/...` 路由确定。页面内部负责选择 IdP、临时填写本次调试密钥，并生成、复制和打开管理同步、浏览器同步、清理和 Webhook 测试地址。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此插件页面承载复制和打开按钮。入口模板不参与运行配置，真实接口地址由 REST Provider 路由决定。
+后台 Identity Provider 配置页会显示一个固定的“接口地址页面模板”入口：`/realms/{realm}/dingtalk-sync/endpoints`。插件不能在启动阶段依赖当前请求 realm，也不应在 `postInit` 中回写 IdP 配置；实际地址必须在访问页面时由 `/realms/<realm>/...` 路由确定。页面内部负责选择 IdP、临时填写本次调试密钥，并把地址分成两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此插件页面承载访问和复制按钮。入口模板不参与运行配置，真实接口地址由 REST Provider 路由决定。
 
 ## 同步结果语义
 

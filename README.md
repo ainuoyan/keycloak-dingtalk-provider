@@ -170,9 +170,9 @@ services:
 | 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址可通过后台下方的“接口地址页面模板”入口查看 |
 | 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览、正式同步和 Webhook 测试 |
 
-> 后台会显示一个固定的“接口地址页面模板”入口：`/realms/{realm}/dingtalk-sync/endpoints`。这是展示用模板，不会在插件启动时写入或更新 IdP 配置；把 `{realm}` 替换为当前 realm 后打开页面，即可选择钉钉 IdP、临时填写本次浏览器同步调试密钥，并生成、复制和打开管理同步、浏览器同步、清理、Webhook 测试地址。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由 REST Provider 路由决定。
+> 后台会显示一个固定的“接口地址页面模板”入口：`/realms/{realm}/dingtalk-sync/endpoints`。这是展示用模板，不会在插件启动时写入或更新 IdP 配置；把 `{realm}` 替换为当前 realm 后打开页面，即可选择钉钉 IdP、临时填写本次浏览器同步调试密钥。页面会把地址分为两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由 REST Provider 路由决定。
 
-> Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该组件。插件因此只在配置页放一个固定入口模板，复制按钮和打开按钮放在插件自己的接口地址页面里。该入口模板不参与运行配置，插件运行时不会读取它。
+> Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该组件。插件因此只在配置页放一个固定入口模板，访问按钮和复制按钮放在插件自己的接口地址页面里。该入口模板不参与运行配置，插件运行时不会读取它。
 
 > `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 
@@ -246,7 +246,7 @@ https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?***
 
 插件提供了一个管理端手动同步入口，方便测试和排障。POST 会执行真实同步，并且会先校验当前调用者是否具备当前 realm 的 `manage-users` 权限。GET 真实同步默认关闭；只有短期开启“启用 GET 同步调试入口”后才可用，并且还要求显式追加 `confirm=RUN_DINGTALK_SYNC`，避免浏览器误点或 CSRF 式误触发。
 
-如需页面化查看、复制和打开所有同步相关地址，可以访问插件接口地址页面：
+如需页面化查看浏览器 GET 地址和管理端 POST API 地址，可以访问插件接口地址页面：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/endpoints?alias={idpAlias}
@@ -254,7 +254,7 @@ https://your-keycloak-domain/realms/{realm}/dingtalk-sync/endpoints?alias={idpAl
 
 `{realm}` 是当前 realm 名称，例如 `master`；它不是从 Keycloak 管理台当前页面 hash 自动拼接的，而是访问 `/realms/<realm>/...` 时由服务端请求路径确定。`alias` 可以省略，当前 realm 只有一个启用的钉钉 IdP 时页面会自动选中，否则需要在页面里选择或在 URL 中传入。
 
-如果在 URL 中追加本次调试密钥，页面会为浏览器 GET 入口显示“打开”按钮：
+如果在 URL 中追加本次调试密钥，页面会为浏览器 GET 入口显示“访问”按钮；POST API 入口仍显示“复制地址”按钮：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/endpoints?alias={idpAlias}&key={浏览器同步调试密钥}
