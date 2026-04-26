@@ -46,6 +46,29 @@ public class DingTalkSyncAdminResource {
     }
 
     @GET
+    @Path("debug")
+    public Response previewSync(@QueryParam("alias") String alias) throws Exception {
+        auth.users().requireManage();
+
+        RealmModel previousRealm = session.getContext().getRealm();
+        try {
+            session.getContext().setRealm(realm);
+            DingTalkUserSyncTask.SyncResult result = new DingTalkUserSyncTask()
+                    .previewProviderNow(session, realm, alias);
+
+            adminEvent.operation(OperationType.ACTION)
+                    .resource(DingTalkSyncAdminResourceProviderFactory.PROVIDER_ID + "/debug")
+                    .detail("alias", alias)
+                    .detail("dryRun", "true")
+                    .success();
+
+            return syncResultResponse(result, true);
+        } finally {
+            session.getContext().setRealm(previousRealm);
+        }
+    }
+
+    @GET
     @Path("cleanup-numeric-users")
     public Response previewNumericCleanup(@QueryParam("alias") String alias) {
         return cleanupNumericUsers(alias, null, false);
@@ -78,21 +101,26 @@ public class DingTalkSyncAdminResource {
                     .detail("alias", alias)
                     .success();
 
-            return Response.ok(Map.of(
-                    "alias", result.alias(),
-                    "listed", result.listed(),
-                    "matched", result.matched(),
-                    "created", result.created(),
-                    "linked", result.linked(),
-                    "updated", result.updated(),
-                    "reenabled", result.reenabled(),
-                    "disabled", result.disabled(),
-                    "skipped", result.skipped(),
-                    "reason", result.reason() == null ? "" : result.reason()
-            ), MediaType.APPLICATION_JSON_TYPE).build();
+            return syncResultResponse(result, false);
         } finally {
             session.getContext().setRealm(previousRealm);
         }
+    }
+
+    private Response syncResultResponse(DingTalkUserSyncTask.SyncResult result, boolean dryRun) {
+        return Response.ok(Map.ofEntries(
+                Map.entry("alias", result.alias()),
+                Map.entry("dryRun", dryRun),
+                Map.entry("listed", result.listed()),
+                Map.entry("matched", result.matched()),
+                Map.entry("created", result.created()),
+                Map.entry("linked", result.linked()),
+                Map.entry("updated", result.updated()),
+                Map.entry("reenabled", result.reenabled()),
+                Map.entry("disabled", result.disabled()),
+                Map.entry("skipped", result.skipped()),
+                Map.entry("reason", result.reason() == null ? "" : result.reason())
+        ), MediaType.APPLICATION_JSON_TYPE).build();
     }
 
     private Response cleanupNumericUsers(String alias, String confirm, boolean execute) {

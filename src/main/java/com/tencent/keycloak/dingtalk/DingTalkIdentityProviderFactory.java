@@ -219,9 +219,9 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
         ProviderConfigProperty browserSyncDebugUrl = new ProviderConfigProperty(
                 BROWSER_SYNC_DEBUG_URL,
                 "浏览器同步预览地址",
-                "纯浏览器预览可访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；返回 dry-run 统计，不创建、更新、禁用用户。",
+                "管理端浏览器预览可访问 GET /admin/realms/{realm}/dingtalk-sync/debug?alias={alias}；需要管理员认证和 manage-users 权限，返回 dry-run 统计，不创建、更新、禁用用户。",
                 ProviderConfigProperty.STRING_TYPE,
-                "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}");
+                "/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}");
         browserSyncDebugUrl.setReadOnly(true);
         properties.add(browserSyncDebugUrl);
 

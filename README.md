@@ -146,7 +146,7 @@ services:
 | 记录同步明细日志 | 默认关闭；开启后定时同步会记录每个钉钉用户的匹配来源、Keycloak 用户名、更新字段和跳过原因。手动同步会自动记录明细 |
 | 浏览器同步调试密钥 | 默认空，填写后启用纯浏览器 GET 预览入口。该入口只返回 dry-run 统计，不写入 Keycloak |
 | 管理端同步调试地址 | 只读提示项，显示管理 API 调试路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC`；GET/POST 都会真实同步且需要管理权限，GET 额外要求确认参数 |
-| 浏览器同步预览地址 | 只读提示项，显示 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}` |
+| 浏览器同步预览地址 | 只读提示项，显示管理端 GET 预览路径 `/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}`；需要管理员认证和 `manage-users` 权限 |
 
 > `登录后是否更新用户信息` 只控制 Provider 是否写回用户属性。它不会关闭 Keycloak 首次第三方登录流程里的 **Review Profile / Update Profile** 页面；如果 AD 用户已经同步完成，只希望钉钉按用户名或邮箱绑定已有用户，请复制 `first broker login` flow，禁用或删除其中的 `Review Profile` 执行项，然后在钉钉 Identity Provider 的 **First Login Flow** 里选择这个副本。
 
@@ -214,13 +214,19 @@ https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAl
 
 `alias` 是钉钉 Identity Provider 的别名；如果不传 `alias`，会同步当前 realm 下所有启用的钉钉 Identity Provider。
 
-如果需要不带 Admin Bearer Token、直接在浏览器地址栏查看钉钉通讯录同步预览，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
+如果需要在浏览器地址栏查看钉钉通讯录同步预览，优先使用管理端 dry-run 入口。它要求当前浏览器已登录 Keycloak 管理端，并且具备当前 realm 的 `manage-users` 权限：
+
+```text
+https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}
+```
+
+如果需要不带 Admin Bearer Token、直接用调试密钥访问公开预览入口，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}&key={浏览器同步调试密钥}
 ```
 
-这个浏览器入口要求 `alias` 和密钥都正确；密钥为空时入口禁用。它会调用钉钉接口并返回 `dryRun=true` 的统计和明细日志，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后清空。
+这两个预览入口都会调用钉钉接口并返回 `dryRun=true` 的统计和明细日志，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。公开预览入口要求 `alias` 和密钥都正确；密钥为空时入口禁用。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后清空。
 
 如需清理早期错误同步产生的纯数字 username 用户，可以先使用受同一调试密钥保护的浏览器入口预览名单。它只会匹配同时满足以下条件的用户：当前钉钉 IDP 托管、已绑定当前钉钉 IDP、username 全数字，并且是同步创建用户或旧版 username 等于 `dingtalk_userid` 的用户。
 
