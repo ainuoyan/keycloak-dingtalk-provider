@@ -76,7 +76,8 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     @Override
     public DingTalkIdentityProvider create(KeycloakSession session, IdentityProviderModel model) {
-        ensureEndpointReferenceConfig(model);
+        boolean updated = ensureEndpointReferenceConfig(model);
+        persistEndpointReferenceConfigIfRealmAvailable(session, model, updated);
         return new DingTalkIdentityProvider(session, new OAuth2IdentityProviderConfig(model));
     }
 
@@ -103,7 +104,6 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                         PERIODIC_SYNC_CHECK_INTERVAL_MS,
                         DingTalkUserSyncTask.TASK_NAME);
             }
-            persistEndpointReferenceConfig(session);
         });
     }
 
@@ -282,18 +282,17 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
         return true;
     }
 
-    private void persistEndpointReferenceConfig(KeycloakSession session) {
-        List<RealmModel> realms = session.realms().getRealmsStream().toList();
-        for (RealmModel realm : realms) {
-            List<IdentityProviderModel> providers = realm.getIdentityProvidersStream()
-                    .filter(idp -> PROVIDER_ID.equals(idp.getProviderId()))
-                    .toList();
-            for (IdentityProviderModel provider : providers) {
-                if (ensureEndpointReferenceConfig(provider)) {
-                    realm.updateIdentityProvider(provider);
-                }
-            }
+    private void persistEndpointReferenceConfigIfRealmAvailable(KeycloakSession session,
+                                                                IdentityProviderModel idp,
+                                                                boolean updated) {
+        if (!updated || session == null || idp == null || idp.getAlias() == null) {
+            return;
         }
+        RealmModel currentRealm = session.getContext() == null ? null : session.getContext().getRealm();
+        if (currentRealm == null || currentRealm.getIdentityProviderByAlias(idp.getAlias()) == null) {
+            return;
+        }
+        currentRealm.updateIdentityProvider(idp);
     }
 
     static boolean isSyncGetDebugEnabled(IdentityProviderModel idp) {
