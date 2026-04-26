@@ -76,6 +76,7 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
     private static final String UNION_ID = "dingtalk_unionid";
     private static final String DINGTALK_USER_ID = "dingtalk_userid";
     private static final String CORP_ID = "dingtalk_corpid";
+    private static final String ENTERPRISE_VERIFIED = "dingtalk_enterprise_verified";
     private static final String NICK_NAME = "nickname";
     private static final String PHONE_NUMBER = "phoneNumber";
     private static final String IS_UPDATE_USER_INFO = "isUpdateUserInfo";
@@ -183,6 +184,7 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         // 获取保存的 token 响应信息
         UserTokenDto tokenDto = tokenResponseHolder.get();
         String corpId = tokenDto != null ? tokenDto.getCorpId() : null;
+        boolean enterpriseVerifiedByCorpApi = false;
         
         logger.debugf("Calling DingTalk user info API with accessToken=%s, corpId=%s",
                 mask(accessToken), mask(corpId));
@@ -211,10 +213,12 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         }
 
         // 新版 OAuth 接口有时只返回 openId/unionId，不返回手机号、邮箱或通讯录 userId。
-        // 只要企业 corpId 可用且关键信息缺失，就补查企业通讯录接口并合并非空字段。
-        if (StringUtils.isNotBlank(corpId) && needsCorpUserInfo(userDto)) {
+        // 企业登录校验开启时，即使基础资料已足够，也要用企业通讯录接口反查 unionId 是否属于当前 app 所在企业。
+        if (shouldQueryCorpUserInfo(tokenDto, userDto)) {
             logger.debug("Trying corp internal API to complete DingTalk user info");
-            userDto = mergeMissingUserInfo(userDto, getUserInfoByCorpApi(corpId, userDto));
+            UserDto corpUserInfo = getUserInfoByCorpApi(corpId, userDto);
+            enterpriseVerifiedByCorpApi = corpUserInfo != null && StringUtils.isNotBlank(corpUserInfo.getUserId());
+            userDto = mergeMissingUserInfo(userDto, corpUserInfo);
         }
 
         // 最后尝试从 token 响应中获取信息
@@ -222,10 +226,11 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
             if (tokenDto != null && StringUtils.isNotBlank(tokenDto.getOpenId())) {
                 logger.infof("Using token response info as fallback. openId=%s, unionId=%s",
                         mask(tokenDto.getOpenId()), mask(tokenDto.getUnionId()));
-                userDto = new UserDto();
-                userDto.setOpenId(tokenDto.getOpenId());
-                userDto.setUnionId(tokenDto.getUnionId());
-                userDto.setNick("dingtalk_user");
+                UserDto tokenFallback = new UserDto();
+                tokenFallback.setOpenId(tokenDto.getOpenId());
+                tokenFallback.setUnionId(tokenDto.getUnionId());
+                tokenFallback.setNick("dingtalk_user");
+                userDto = mergeMissingUserInfo(userDto, tokenFallback);
             }
         }
 
@@ -259,6 +264,9 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         }
         if (StringUtils.isNotBlank(corpId)) {
             context.setUserAttribute(CORP_ID, corpId);
+        }
+        if (enterpriseVerifiedByCorpApi) {
+            context.setUserAttribute(ENTERPRISE_VERIFIED, "true");
         }
         if (StringUtils.isNotBlank(userDto.getNick())) {
             context.setUserAttribute(NICK_NAME, userDto.getNick());
@@ -316,7 +324,8 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         super.preprocessFederatedIdentity(session, realm, context);
 
         Map<String, String> config = context.getIdpConfig().getConfig();
-        if (!isEnterpriseLoginAllowed(config, context.getUserAttribute(CORP_ID))) {
+        if (!isEnterpriseLoginAllowed(config, context.getUserAttribute(CORP_ID),
+                Boolean.parseBoolean(context.getUserAttribute(ENTERPRISE_VERIFIED)))) {
             throw new IdentityBrokerException("DingTalk login rejected: user is not from allowed enterprise");
         }
 
@@ -568,6 +577,16 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
                 || StringUtils.isBlank(userDto.getEmail());
     }
 
+    private boolean shouldQueryCorpUserInfo(UserTokenDto tokenDto, UserDto userDto) {
+        return hasUnionId(tokenDto, userDto)
+                && (needsCorpUserInfo(userDto) || isEnterpriseLoginRequired(getConfig().getConfig()));
+    }
+
+    static boolean hasUnionId(UserTokenDto tokenDto, UserDto userDto) {
+        return (tokenDto != null && StringUtils.isNotBlank(tokenDto.getUnionId()))
+                || (userDto != null && StringUtils.isNotBlank(userDto.getUnionId()));
+    }
+
     static UserDto mergeMissingUserInfo(UserDto primary, UserDto fallback) {
         if (primary == null) {
             return fallback;
@@ -634,7 +653,14 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
             logger.debugf("Got userId: %s", mask(userId));
 
             // 2. 通过 userId 获取用户详情
-            return getUserDetailByUserId(corpAccessToken, userId);
+            UserDto userDetail = getUserDetailByUserId(corpAccessToken, userId);
+            if (userDetail != null) {
+                return userDetail;
+            }
+
+            UserDto verifiedUser = new UserDto();
+            verifiedUser.setUserId(userId);
+            return verifiedUser;
 
         } catch (Exception e) {
             logger.warn("Failed to get user info by corp API", e);
@@ -918,8 +944,12 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         return config == null || Boolean.parseBoolean(config.getOrDefault(REQUIRE_ENTERPRISE_USER, "true"));
     }
 
-    static boolean isEnterpriseLoginAllowed(Map<String, String> config, String corpId) {
+    static boolean isEnterpriseLoginAllowed(Map<String, String> config, String corpId,
+                                            boolean verifiedByCorpApi) {
         if (!isEnterpriseLoginRequired(config)) {
+            return true;
+        }
+        if (verifiedByCorpApi) {
             return true;
         }
 

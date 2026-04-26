@@ -37,9 +37,10 @@ class DingTalkIdentityProviderTest {
     void enterpriseLoginGuardDefaultsToRequiredAndRequiresCorpId() {
         assertTrue(DingTalkIdentityProvider.isEnterpriseLoginRequired(null));
         assertTrue(DingTalkIdentityProvider.isEnterpriseLoginRequired(Map.of()));
-        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), null));
-        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), " "));
-        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), "dingcorp001"));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), null, false));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), " ", false));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), "dingcorp001", false));
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(Map.of(), null, true));
     }
 
     @Test
@@ -50,11 +51,24 @@ class DingTalkIdentityProviderTest {
 
         assertEquals(List.of("dingcorp001", "dingcorp002"),
                 DingTalkIdentityProvider.parseAllowedCorpIds(config));
-        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "dingcorp001"));
-        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "DINGCORP002"));
-        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "dingcorp003"));
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "dingcorp001", false));
+        assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "DINGCORP002", false));
+        assertFalse(DingTalkIdentityProvider.isEnterpriseLoginAllowed(config, "dingcorp003", false));
         assertTrue(DingTalkIdentityProvider.isEnterpriseLoginAllowed(
-                Map.of("requireEnterpriseUser", "false"), null));
+                Map.of("requireEnterpriseUser", "false"), null, false));
+    }
+
+    @Test
+    void enterpriseLoginGuardCanUseUnionIdForCorpApiVerification() {
+        UserTokenDto tokenDto = new UserTokenDto();
+        assertFalse(DingTalkIdentityProvider.hasUnionId(tokenDto, null));
+
+        tokenDto.setUnionId("union-001");
+        assertTrue(DingTalkIdentityProvider.hasUnionId(tokenDto, null));
+
+        UserDto userDto = new UserDto();
+        userDto.setUnionId("union-002");
+        assertTrue(DingTalkIdentityProvider.hasUnionId(null, userDto));
     }
 
     @Test
