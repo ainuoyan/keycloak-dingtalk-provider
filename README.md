@@ -256,31 +256,31 @@ https://your-keycloak-domain/realms/{realm}/dingtalk-sync/run?alias={idpAlias}&k
 
 两个预览入口都会调用钉钉接口并返回 `dryRun=true` 的统计，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。浏览器执行入口返回 `dryRun=false` 并执行真实同步。公开浏览器入口要求开关、`alias` 和密钥都正确；密钥为空或开关关闭时入口禁用。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后关闭开关并清空密钥。
 
-如需清理早期错误同步产生的纯数字 username 用户，可以先使用受同一 GET 调试开关和调试密钥保护的浏览器入口预览名单。它只会匹配同时满足以下条件的用户：当前钉钉 IDP 托管、已绑定当前钉钉 IDP、username 全数字，并且是同步创建用户或旧版 username 等于 `dingtalk_userid` 的用户。
+如需清理由当前钉钉 IDP 同步创建到 Keycloak 的用户，可以先使用受同一 GET 调试开关和调试密钥保护的浏览器入口预览名单。它只会匹配同时满足以下条件的用户：当前钉钉 IDP 托管、已绑定当前钉钉 IDP，并且带有 `dingtalk_created_by_sync=true` 标记。仅被钉钉同步匹配、绑定或更新过的既有 Keycloak/AD 用户不会被纳入删除名单。
 
 先 dry-run 查看名单：
 
 ```text
-https://your-keycloak-domain/realms/{realm}/dingtalk-sync/cleanup-numeric-users?alias={idpAlias}&key={浏览器同步调试密钥}
+https://your-keycloak-domain/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={idpAlias}&key={浏览器同步调试密钥}
 ```
 
 浏览器入口永远只做 dry-run，不会删除用户。确认名单无误后，使用管理端接口执行删除，调用者必须具备 `manage-users` 权限：
 
 ```text
-https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/cleanup-numeric-users?alias={idpAlias}
+https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={idpAlias}
 ```
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <admin-access-token>" \
-  "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/cleanup-numeric-users?alias={idpAlias}&confirm=DELETE_NUMERIC_DINGTALK_USERS"
+  "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={idpAlias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS"
 ```
 
-旧的浏览器 POST 地址同样受“启用 GET 同步调试入口”和调试密钥保护，并且只会返回 dry-run 结果，不会执行删除：
+浏览器 POST 地址同样受“启用 GET 同步调试入口”和调试密钥保护，并且只会返回 dry-run 结果，不会执行删除：
 
 ```bash
 curl -X POST \
-  "https://your-keycloak-domain/realms/{realm}/dingtalk-sync/cleanup-numeric-users?alias={idpAlias}&key={浏览器同步调试密钥}&confirm=DELETE_NUMERIC_DINGTALK_USERS"
+  "https://your-keycloak-domain/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={idpAlias}&key={浏览器同步调试密钥}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS"
 ```
 
 删除后用管理端 POST 手动同步或等待定时同步，会按姓名拼音规则重新创建用户，或按手机号、邮箱等规则绑定已有用户。浏览器预览地址只做 dry-run，不会重新创建用户。

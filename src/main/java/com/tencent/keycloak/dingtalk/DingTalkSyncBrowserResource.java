@@ -83,39 +83,39 @@ public class DingTalkSyncBrowserResource {
     }
 
     @GET
-    @Path("cleanup-numeric-users")
-    public Response cleanupNumericUsers(@QueryParam("alias") String alias,
-                                        @QueryParam("key") String key) {
-        return previewNumericUserCleanup(alias, key);
+    @Path("cleanup-sync-created-users")
+    public Response cleanupSyncCreatedUsers(@QueryParam("alias") String alias,
+                                            @QueryParam("key") String key) {
+        return previewSyncCreatedUserCleanup(alias, key);
     }
 
     @POST
-    @Path("cleanup-numeric-users")
-    public Response cleanupNumericUsersPost(@QueryParam("alias") String alias,
-                                            @QueryParam("key") String key) {
-        return previewNumericUserCleanup(alias, key);
+    @Path("cleanup-sync-created-users")
+    public Response cleanupSyncCreatedUsersPost(@QueryParam("alias") String alias,
+                                                @QueryParam("key") String key) {
+        return previewSyncCreatedUserCleanup(alias, key);
     }
 
-    private Response previewNumericUserCleanup(String alias, String key) {
+    private Response previewSyncCreatedUserCleanup(String alias, String key) {
         RealmModel realm = session.getContext().getRealm();
         IdentityProviderModel idp = getAuthorizedDingTalkProvider(realm, alias, key);
         if (idp == null) {
             return json(Response.Status.FORBIDDEN, Map.of("error", "unauthorized_or_not_found"));
         }
 
-        DingTalkNumericUserCleanup.CleanupResult result =
-                DingTalkNumericUserCleanup.preview(session, realm, idp);
+        DingTalkSyncCreatedUserCleanup.CleanupResult result =
+                DingTalkSyncCreatedUserCleanup.preview(session, realm, idp);
         return Response.ok(Map.of(
                 "alias", result.alias(),
                 "dryRun", true,
                 "candidateCount", result.candidateCount(),
                 "usernames", result.usernames(),
                 "deleteMethod", "POST admin endpoint",
-                "confirm", DingTalkNumericUserCleanup.CONFIRM,
+                "confirm", DingTalkSyncCreatedUserCleanup.CONFIRM,
                 "adminPath", "/admin/realms/" + realm.getName()
-                        + "/dingtalk-sync/cleanup-numeric-users?alias=" + alias
-                        + "&confirm=" + DingTalkNumericUserCleanup.CONFIRM,
-                "message", "Browser cleanup endpoint is preview-only. Use the admin endpoint to delete users."
+                        + "/dingtalk-sync/cleanup-sync-created-users?alias=" + alias
+                        + "&confirm=" + DingTalkSyncCreatedUserCleanup.CONFIRM,
+                "message", "Browser cleanup endpoint is preview-only. Use the admin endpoint to delete DingTalk sync-created users."
         ), MediaType.APPLICATION_JSON_TYPE).build();
     }
 

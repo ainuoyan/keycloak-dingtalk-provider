@@ -1,8 +1,6 @@
 package com.tencent.keycloak.dingtalk;
 
 import java.util.List;
-import java.util.regex.Pattern;
-import org.apache.commons.lang3.StringUtils;
 import org.jboss.logging.Logger;
 import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderModel;
@@ -10,14 +8,13 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 
-final class DingTalkNumericUserCleanup {
+final class DingTalkSyncCreatedUserCleanup {
 
-    static final String CONFIRM = "DELETE_NUMERIC_DINGTALK_USERS";
-    private static final Pattern NUMERIC_USERNAME = Pattern.compile("\\d+");
+    static final String CONFIRM = "DELETE_DINGTALK_SYNC_CREATED_USERS";
 
-    private static final Logger logger = Logger.getLogger(DingTalkNumericUserCleanup.class);
+    private static final Logger logger = Logger.getLogger(DingTalkSyncCreatedUserCleanup.class);
 
-    private DingTalkNumericUserCleanup() {
+    private DingTalkSyncCreatedUserCleanup() {
     }
 
     static CleanupResult preview(KeycloakSession session, RealmModel realm, IdentityProviderModel idp) {
@@ -31,7 +28,7 @@ final class DingTalkNumericUserCleanup {
 
         int deleted = 0;
         for (UserModel user : candidates) {
-            logger.warnf("Deleting numeric DingTalk-managed user. realm=%s, idp=%s, username=%s",
+            logger.warnf("Deleting DingTalk sync-created user. realm=%s, idp=%s, username=%s",
                     realm.getName(), idp.getAlias(), user.getUsername());
             if (session.users().removeUser(realm, user)) {
                 deleted++;
@@ -47,10 +44,9 @@ final class DingTalkNumericUserCleanup {
 
     private static List<UserModel> findCandidates(KeycloakSession session, RealmModel realm, IdentityProviderModel idp) {
         return session.users()
-                .searchForUserByUserAttributeStream(realm, "dingtalk_idp_alias", idp.getAlias())
-                .filter(user -> user.getUsername() != null && NUMERIC_USERNAME.matcher(user.getUsername()).matches())
-                .filter(user -> "true".equals(user.getFirstAttribute("dingtalk_managed")))
-                .filter(DingTalkNumericUserCleanup::isSyncCreatedOrLegacyNumericUser)
+                .searchForUserByUserAttributeStream(realm, DingTalkUserSyncTask.DINGTALK_IDP_ALIAS, idp.getAlias())
+                .filter(user -> "true".equals(user.getFirstAttribute(DingTalkUserSyncTask.DINGTALK_MANAGED)))
+                .filter(user -> "true".equals(user.getFirstAttribute(DingTalkUserSyncTask.DINGTALK_CREATED_BY_SYNC)))
                 .filter(user -> hasFederatedIdentity(session, realm, user, idp.getAlias()))
                 .toList();
     }
@@ -60,16 +56,6 @@ final class DingTalkNumericUserCleanup {
                 .map(UserModel::getUsername)
                 .sorted()
                 .toList();
-    }
-
-    private static boolean isSyncCreatedOrLegacyNumericUser(UserModel user) {
-        if ("true".equals(user.getFirstAttribute(DingTalkUserSyncTask.DINGTALK_CREATED_BY_SYNC))) {
-            return true;
-        }
-
-        String username = user.getUsername();
-        String dingtalkUserId = user.getFirstAttribute("dingtalk_userid");
-        return StringUtils.isNotBlank(username) && username.equals(dingtalkUserId);
     }
 
     private static boolean hasFederatedIdentity(KeycloakSession session, RealmModel realm, UserModel user, String alias) {

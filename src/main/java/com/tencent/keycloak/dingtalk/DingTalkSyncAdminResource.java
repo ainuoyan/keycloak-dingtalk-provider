@@ -74,16 +74,16 @@ public class DingTalkSyncAdminResource {
     }
 
     @GET
-    @Path("cleanup-numeric-users")
-    public Response previewNumericCleanup(@QueryParam("alias") String alias) {
-        return cleanupNumericUsers(alias, null, false);
+    @Path("cleanup-sync-created-users")
+    public Response previewSyncCreatedUserCleanup(@QueryParam("alias") String alias) {
+        return cleanupSyncCreatedUsers(alias, null, false);
     }
 
     @POST
-    @Path("cleanup-numeric-users")
-    public Response cleanupNumericUsers(@QueryParam("alias") String alias,
-                                        @QueryParam("confirm") String confirm) {
-        return cleanupNumericUsers(alias, confirm, true);
+    @Path("cleanup-sync-created-users")
+    public Response cleanupSyncCreatedUsers(@QueryParam("alias") String alias,
+                                            @QueryParam("confirm") String confirm) {
+        return cleanupSyncCreatedUsers(alias, confirm, true);
     }
 
     private Response runSync(String alias, boolean requireConfirm, String confirm, boolean getRequest) throws Exception {
@@ -134,7 +134,7 @@ public class DingTalkSyncAdminResource {
         ), MediaType.APPLICATION_JSON_TYPE).build();
     }
 
-    private Response cleanupNumericUsers(String alias, String confirm, boolean execute) {
+    private Response cleanupSyncCreatedUsers(String alias, String confirm, boolean execute) {
         auth.users().requireManage();
         if (StringUtils.isBlank(alias)) {
             return json(Response.Status.BAD_REQUEST, Map.of("error", "alias_required"));
@@ -150,19 +150,19 @@ public class DingTalkSyncAdminResource {
             if (!execute && !DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(idp)) {
                 return getDebugDisabledResponse(List.of(idp.getAlias()));
             }
-            if (execute && !DingTalkNumericUserCleanup.CONFIRM.equals(confirm)) {
+            if (execute && !DingTalkSyncCreatedUserCleanup.CONFIRM.equals(confirm)) {
                 return json(Response.Status.BAD_REQUEST, Map.of(
                         "error", "confirm_required",
-                        "confirm", DingTalkNumericUserCleanup.CONFIRM
+                        "confirm", DingTalkSyncCreatedUserCleanup.CONFIRM
                 ));
             }
 
-            DingTalkNumericUserCleanup.CleanupResult result = execute
-                    ? DingTalkNumericUserCleanup.execute(session, realm, idp)
-                    : DingTalkNumericUserCleanup.preview(session, realm, idp);
+            DingTalkSyncCreatedUserCleanup.CleanupResult result = execute
+                    ? DingTalkSyncCreatedUserCleanup.execute(session, realm, idp)
+                    : DingTalkSyncCreatedUserCleanup.preview(session, realm, idp);
 
             adminEvent.operation(OperationType.ACTION)
-                    .resource(DingTalkSyncAdminResourceProviderFactory.PROVIDER_ID + "/cleanup-numeric-users")
+                    .resource(DingTalkSyncAdminResourceProviderFactory.PROVIDER_ID + "/cleanup-sync-created-users")
                     .detail("alias", alias)
                     .detail("dryRun", String.valueOf(result.dryRun()))
                     .detail("candidateCount", String.valueOf(result.candidateCount()))

@@ -59,8 +59,8 @@ public class DingTalkUserSyncTask implements ScheduledTask {
     private static final String UNION_ID = "dingtalk_unionid";
     private static final String DINGTALK_USER_ID = "dingtalk_userid";
     private static final String CORP_ID = "dingtalk_corpid";
-    private static final String DINGTALK_MANAGED = "dingtalk_managed";
-    private static final String DINGTALK_IDP_ALIAS = "dingtalk_idp_alias";
+    static final String DINGTALK_MANAGED = "dingtalk_managed";
+    static final String DINGTALK_IDP_ALIAS = "dingtalk_idp_alias";
     private static final String DINGTALK_EXTERNAL_ID = "dingtalk_external_id";
     private static final String DINGTALK_LAST_SYNC = "dingtalk_last_sync";
     private static final String DINGTALK_LAST_SYNC_AT = "dingtalk_last_sync_at";
