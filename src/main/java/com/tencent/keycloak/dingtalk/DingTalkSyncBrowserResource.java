@@ -2,7 +2,6 @@ package com.tencent.keycloak.dingtalk;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.List;
 import java.util.Map;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -12,11 +11,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.apache.commons.lang3.StringUtils;
 import org.jboss.logging.Logger;
-import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel;
 
 public class DingTalkSyncBrowserResource {
 
@@ -91,57 +88,36 @@ public class DingTalkSyncBrowserResource {
     @Path("cleanup-numeric-users")
     public Response cleanupNumericUsers(@QueryParam("alias") String alias,
                                         @QueryParam("key") String key) {
-        return cleanupNumericUsers(alias, key, null, false);
+        return previewNumericUserCleanup(alias, key);
     }
 
     @POST
     @Path("cleanup-numeric-users")
     public Response cleanupNumericUsersPost(@QueryParam("alias") String alias,
-                                            @QueryParam("key") String key,
-                                            @QueryParam("confirm") String confirm) {
-        return cleanupNumericUsers(alias, key, confirm, true);
+                                            @QueryParam("key") String key) {
+        return previewNumericUserCleanup(alias, key);
     }
 
-    private Response cleanupNumericUsers(String alias, String key, String confirm, boolean allowExecute) {
+    private Response previewNumericUserCleanup(String alias, String key) {
         RealmModel realm = session.getContext().getRealm();
         IdentityProviderModel idp = getAuthorizedDingTalkProvider(realm, alias, key);
         if (idp == null) {
             return json(Response.Status.FORBIDDEN, Map.of("error", "unauthorized_or_not_found"));
         }
 
-        boolean execute = allowExecute && "DELETE_NUMERIC_DINGTALK_USERS".equals(confirm);
-        List<UserModel> candidates = findNumericDingTalkUsers(realm, idp);
-        List<String> usernames = candidates.stream()
-                .map(UserModel::getUsername)
-                .sorted()
-                .toList();
-
-        if (!execute) {
-            return Response.ok(Map.of(
-                    "alias", alias,
-                    "dryRun", true,
-                    "candidateCount", usernames.size(),
-                    "usernames", usernames,
-                    "deleteMethod", "POST",
-                    "confirm", "DELETE_NUMERIC_DINGTALK_USERS"
-            ), MediaType.APPLICATION_JSON_TYPE).build();
-        }
-
-        int deleted = 0;
-        for (UserModel user : candidates) {
-            logger.warnf("Deleting numeric DingTalk-managed user. realm=%s, idp=%s, username=%s",
-                    realm.getName(), alias, user.getUsername());
-            if (session.users().removeUser(realm, user)) {
-                deleted++;
-            }
-        }
-
+        DingTalkNumericUserCleanup.CleanupResult result =
+                DingTalkNumericUserCleanup.preview(session, realm, idp);
         return Response.ok(Map.of(
-                "alias", alias,
-                "dryRun", false,
-                "candidateCount", usernames.size(),
-                "deleted", deleted,
-                "usernames", usernames
+                "alias", result.alias(),
+                "dryRun", true,
+                "candidateCount", result.candidateCount(),
+                "usernames", result.usernames(),
+                "deleteMethod", "POST admin endpoint",
+                "confirm", DingTalkNumericUserCleanup.CONFIRM,
+                "adminPath", "/admin/realms/" + realm.getName()
+                        + "/dingtalk-sync/cleanup-numeric-users?alias=" + alias
+                        + "&confirm=" + DingTalkNumericUserCleanup.CONFIRM,
+                "message", "Browser cleanup endpoint is preview-only. Use the admin endpoint to delete users."
         ), MediaType.APPLICATION_JSON_TYPE).build();
     }
 
@@ -172,31 +148,6 @@ public class DingTalkSyncBrowserResource {
         }
 
         return idp;
-    }
-
-    private List<UserModel> findNumericDingTalkUsers(RealmModel realm, IdentityProviderModel idp) {
-        return session.users()
-                .searchForUserByUserAttributeStream(realm, "dingtalk_idp_alias", idp.getAlias())
-                .filter(user -> user.getUsername() != null && user.getUsername().matches("\\d+"))
-                .filter(user -> "true".equals(user.getFirstAttribute("dingtalk_managed")))
-                .filter(this::isSyncCreatedOrLegacyNumericUser)
-                .filter(user -> hasFederatedIdentity(realm, user, idp.getAlias()))
-                .toList();
-    }
-
-    private boolean isSyncCreatedOrLegacyNumericUser(UserModel user) {
-        if ("true".equals(user.getFirstAttribute(DingTalkUserSyncTask.DINGTALK_CREATED_BY_SYNC))) {
-            return true;
-        }
-
-        String username = user.getUsername();
-        String dingtalkUserId = user.getFirstAttribute("dingtalk_userid");
-        return StringUtils.isNotBlank(username) && username.equals(dingtalkUserId);
-    }
-
-    private boolean hasFederatedIdentity(RealmModel realm, UserModel user, String alias) {
-        FederatedIdentityModel identity = session.users().getFederatedIdentity(realm, user, alias);
-        return identity != null;
     }
 
     private boolean constantTimeEquals(String expected, String actual) {

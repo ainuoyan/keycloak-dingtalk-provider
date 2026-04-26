@@ -41,6 +41,7 @@ import org.keycloak.broker.social.SocialIdentityProvider;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.http.simple.SimpleHttp;
 import org.keycloak.http.simple.SimpleHttpRequest;
+import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -96,7 +97,9 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
     private static final List<String> PHONE_ATTRIBUTE_NAMES = List.of("phoneNumber", "mobile", "telephoneNumber");
     private static final List<String> SENSITIVE_LOG_KEYS = List.of(
             "accessToken", "refreshToken", "clientSecret", "access_token",
-            "appsecret", "mobile", "email", "phoneNumber");
+            "appsecret", "mobile", "email", "phoneNumber", "userid", "userId",
+            "unionid", "unionId", "openid", "openId", "name", "nick",
+            "avatarUrl", "staffId");
 
     public DingTalkIdentityProvider(KeycloakSession session, OAuth2IdentityProviderConfig config) {
         super(session, config);
@@ -311,6 +314,18 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         super.preprocessFederatedIdentity(session, realm, context);
 
         Map<String, String> config = context.getIdpConfig().getConfig();
+        Optional<UserModel> linkedUser = findLinkedUser(session, realm, context);
+        if (linkedUser.isPresent()) {
+            UserModel user = linkedUser.get();
+            context.setModelUsername(user.getUsername());
+            if (StringUtils.isNotBlank(user.getEmail())) {
+                context.setEmail(user.getEmail());
+            }
+            logger.infof("Resolved DingTalk login by existing federated identity. user=%s",
+                    user.getUsername());
+            return;
+        }
+
         List<String> matchRules = parseMatchRules(config != null ? config.get(MATCH_RULES) : null);
         Optional<UserModel> matchedUser = findMatchingUser(session, realm, context, matchRules);
 
@@ -329,6 +344,26 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         if (!isCreateOnNoMatchAllowed(config)) {
             throw new IdentityBrokerException("DingTalk login rejected: no existing user matched configured rules");
         }
+        if (StringUtils.isBlank(context.getModelUsername())) {
+            throw new IdentityBrokerException("DingTalk login rejected: username cannot be resolved from nickname or email");
+        }
+    }
+
+    private Optional<UserModel> findLinkedUser(KeycloakSession session, RealmModel realm,
+                                               BrokeredIdentityContext context) {
+        if (context == null || context.getIdpConfig() == null
+                || StringUtils.isBlank(context.getIdpConfig().getAlias())
+                || StringUtils.isBlank(context.getId())) {
+            return Optional.empty();
+        }
+
+        UserModel user = session.users().getUserByFederatedIdentity(
+                realm,
+                new FederatedIdentityModel(
+                        context.getIdpConfig().getAlias(),
+                        context.getId(),
+                        context.getUsername()));
+        return Optional.ofNullable(user);
     }
 
     /**
@@ -486,21 +521,8 @@ public class DingTalkIdentityProvider extends AbstractOAuth2IdentityProvider<OAu
         }
     }
 
-    /**
-     * 生成用户名
-     */
-    static String generateUsername(String nickname) {
-        if (StringUtils.isBlank(nickname)) {
-            return "dingtalk_user_" + System.currentTimeMillis();
-        }
-        // 移除特殊字符,保留字母数字和下划线
-        String username = nickname.replaceAll("[^a-zA-Z0-9_\\u4e00-\\u9fa5]", "_");
-        return "dt_" + username;
-    }
-
     static String resolveUsername(UserDto userDto) {
-        String username = DingTalkUserSyncTask.resolveProvisionedUsername(userDto);
-        return StringUtils.defaultIfBlank(username, generateUsername(userDto == null ? null : userDto.getNick()));
+        return DingTalkUserSyncTask.resolveProvisionedUsername(userDto);
     }
 
     static String resolveBrokerUsername(UserDto userDto, String fallbackUsername) {

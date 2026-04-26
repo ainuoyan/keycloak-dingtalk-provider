@@ -55,7 +55,9 @@ class DingTalkIdentityProviderTest {
     void sanitizeForLogRedactsSecretsTokensAndPersonalInfo() {
         String raw = "{\"accessToken\":\"token-123\",\"refreshToken\":\"refresh-456\","
                 + "\"clientSecret\":\"secret-789\",\"mobile\":\"13800000000\","
-                + "\"email\":\"a@example.com\"}";
+                + "\"email\":\"a@example.com\",\"userid\":\"user-001\","
+                + "\"unionid\":\"union-001\",\"openId\":\"open-001\","
+                + "\"name\":\"张三\",\"nick\":\"昵称\"}";
 
         String sanitized = DingTalkIdentityProvider.sanitizeForLog(raw);
 
@@ -64,7 +66,13 @@ class DingTalkIdentityProviderTest {
         assertFalse(sanitized.contains("secret-789"));
         assertFalse(sanitized.contains("13800000000"));
         assertFalse(sanitized.contains("a@example.com"));
+        assertFalse(sanitized.contains("user-001"));
+        assertFalse(sanitized.contains("union-001"));
+        assertFalse(sanitized.contains("open-001"));
+        assertFalse(sanitized.contains("张三"));
+        assertFalse(sanitized.contains("昵称"));
         assertTrue(sanitized.contains("\"accessToken\":\"***\""));
+        assertTrue(sanitized.contains("\"userid\":\"***\""));
     }
 
     @Test
@@ -84,6 +92,15 @@ class DingTalkIdentityProviderTest {
 
         userDto.setUserId("ad_zhangsan");
         assertEquals("zhangsan", DingTalkIdentityProvider.resolveUsername(userDto));
+    }
+
+    @Test
+    void resolveUsernameDoesNotGenerateFallbackWhenNameAndEmailAreMissing() {
+        UserDto userDto = new UserDto();
+        userDto.setUserId("998877");
+        userDto.setUnionId("union-998877");
+
+        assertNull(DingTalkIdentityProvider.resolveUsername(userDto));
     }
 
     @Test
