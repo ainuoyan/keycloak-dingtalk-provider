@@ -145,10 +145,10 @@ services:
 | 定期同步重新启用返聘用户 | 默认开启，离职用户重新出现在钉钉通讯录时自动启用 |
 | 记录同步明细日志 | 默认关闭；开启后定时同步会记录每个钉钉用户的匹配来源、Keycloak 用户名、更新字段和跳过原因。手动同步会自动记录明细 |
 | 浏览器同步调试密钥 | 默认空，填写后启用纯浏览器 GET 预览入口。该入口只返回 dry-run 统计，不写入 Keycloak |
-| 管理端同步调试地址 | 只读提示项，显示管理 API 调试路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC`；GET/POST 都会真实同步且需要管理权限，GET 额外要求确认参数 |
-| 浏览器同步预览地址 | 只读提示项，显示管理端 GET 预览路径 `/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}`；需要管理员认证和 `manage-users` 权限 |
+| 管理 API 同步地址 | 只读提示项，显示管理 API 同步路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC`；GET/POST 都会真实同步，需要 Authorization Bearer 管理端 token 和 `manage-users` 权限，普通浏览器地址栏直接访问通常会 `401` |
+| 浏览器同步预览地址 | 只读提示项，显示纯浏览器 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}`；需要正确调试密钥 |
 
-> 如果旧版本已保存过只读提示项 `browserSyncDebugUrl`，Keycloak 管理台可能继续显示旧的 `/realms/{realm}/dingtalk-sync/debug?...`。新版本改用 `adminSyncPreviewUrl` 作为只读提示项，避免读取旧配置值；重新构建并重启后应显示 `/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}`。
+> `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览请使用 `/realms/{realm}/dingtalk-sync/debug?...&key=...`，并填写实际的“浏览器同步调试密钥”。
 
 > `登录后是否更新用户信息` 只控制 Provider 是否写回用户属性。它不会关闭 Keycloak 首次第三方登录流程里的 **Review Profile / Update Profile** 页面；如果 AD 用户已经同步完成，只希望钉钉按用户名或邮箱绑定已有用户，请复制 `first broker login` flow，禁用或删除其中的 `Review Profile` 执行项，然后在钉钉 Identity Provider 的 **First Login Flow** 里选择这个副本。
 
@@ -226,7 +226,7 @@ curl -X POST \
   "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}"
 ```
 
-浏览器里也可以直接访问同一路径触发真实同步，前提是请求能通过 Keycloak 管理端认证并拥有 `manage-users` 权限：
+这个路径属于 Keycloak 管理 REST API，普通浏览器地址栏不会自动带上 `Authorization: Bearer ...`，直接打开通常会返回 `401`。如需用 GET 触发真实同步，请使用能设置 Bearer token 的调用方式：
 
 ```text
 https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}&confirm=RUN_DINGTALK_SYNC
@@ -234,13 +234,13 @@ https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAl
 
 `alias` 是钉钉 Identity Provider 的别名；如果不传 `alias`，会同步当前 realm 下所有启用的钉钉 Identity Provider。
 
-如果需要在浏览器地址栏查看钉钉通讯录同步预览，优先使用管理端 dry-run 入口。它要求当前浏览器已登录 Keycloak 管理端，并且具备当前 realm 的 `manage-users` 权限：
+如果使用脚本或 API 客户端，也可以调用管理端 dry-run 预览入口。它同样需要 `Authorization: Bearer <admin-access-token>` 和当前 realm 的 `manage-users` 权限：
 
 ```text
 https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}
 ```
 
-如果需要不带 Admin Bearer Token、直接用调试密钥访问公开预览入口，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
+如果需要不带 Admin Bearer token、直接在浏览器地址栏访问公开预览入口，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}&key={浏览器同步调试密钥}

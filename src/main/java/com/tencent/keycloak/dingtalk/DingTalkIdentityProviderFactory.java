@@ -52,7 +52,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String MATCH_RULES = "matchRules";
     private static final String MANUAL_SYNC_URL = "manualSyncUrl";
     static final String BROWSER_SYNC_DEBUG_KEY = "browserSyncDebugKey";
-    private static final String ADMIN_SYNC_PREVIEW_URL = "adminSyncPreviewUrl";
+    private static final String BROWSER_SYNC_PREVIEW_URL = "browserSyncPreviewUrl";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
 
@@ -201,7 +201,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(BROWSER_SYNC_DEBUG_KEY)
                 .label("浏览器同步调试密钥")
-                .helpText("填写后启用纯浏览器 GET 预览入口。该入口只拉取钉钉并返回 dry-run 统计，不写入 Keycloak；真实同步请使用管理端 GET（需确认参数）/POST")
+                .helpText("填写后启用纯浏览器 GET 预览入口。该入口只拉取钉钉并返回 dry-run 统计，不写入 Keycloak；真实同步请使用管理 API")
                 .type(ProviderConfigProperty.PASSWORD)
                 .secret(true)
                 .add()
@@ -209,21 +209,21 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
         ProviderConfigProperty manualSyncUrl = new ProviderConfigProperty(
                 MANUAL_SYNC_URL,
-                "管理端同步调试地址",
-                "管理 API 调试支持 GET /admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC 或 POST 同一路径；会真实同步，需要管理员认证且具备 manage-users 权限。",
+                "管理 API 同步地址",
+                "管理 API 支持 GET /admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC 或 POST 同一路径；会真实同步，需要 Authorization Bearer 管理端 token 和 manage-users 权限，普通浏览器地址栏直接访问通常会 401。",
                 ProviderConfigProperty.STRING_TYPE,
                 "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC");
         manualSyncUrl.setReadOnly(true);
         properties.add(manualSyncUrl);
 
-        ProviderConfigProperty adminSyncPreviewUrl = new ProviderConfigProperty(
-                ADMIN_SYNC_PREVIEW_URL,
+        ProviderConfigProperty browserSyncPreviewUrl = new ProviderConfigProperty(
+                BROWSER_SYNC_PREVIEW_URL,
                 "浏览器同步预览地址",
-                "管理端浏览器预览可访问 GET /admin/realms/{realm}/dingtalk-sync/debug?alias={alias}；需要管理员认证和 manage-users 权限，返回 dry-run 统计，不创建、更新、禁用用户。",
+                "纯浏览器地址栏预览可访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；需要正确调试密钥，返回 dry-run 统计，不创建、更新、禁用用户。",
                 ProviderConfigProperty.STRING_TYPE,
-                "/admin/realms/{realm}/dingtalk-sync/debug?alias={alias}");
-        adminSyncPreviewUrl.setReadOnly(true);
-        properties.add(adminSyncPreviewUrl);
+                "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}");
+        browserSyncPreviewUrl.setReadOnly(true);
+        properties.add(browserSyncPreviewUrl);
 
         return properties;
     }
