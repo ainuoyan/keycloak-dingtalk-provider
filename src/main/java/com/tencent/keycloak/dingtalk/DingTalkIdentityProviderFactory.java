@@ -59,6 +59,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String BROWSER_SYNC_CLEANUP_PREVIEW_URL = "browserSyncCleanupPreviewUrl";
     private static final String ADMIN_SYNC_CLEANUP_EXECUTE_URL = "adminSyncCleanupExecuteUrl";
     private static final String ADMIN_WEBHOOK_TEST_URL = "adminWebhookTestUrl";
+    private static final String BROWSER_WEBHOOK_TEST_URL = "browserWebhookTestUrl";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
 
@@ -225,7 +226,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(SYNC_GET_DEBUG_ENABLED)
                 .label("启用 GET 同步调试入口")
-                .helpText("默认关闭。开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响")
+                .helpText("默认关闭。开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响")
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(false)
                 .add()
@@ -278,6 +279,13 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}；会发送一条钉钉机器人测试消息，需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
                 "/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}");
         properties.add(adminWebhookTestUrl);
+
+        ProviderConfigProperty browserWebhookTestUrl = readOnlyUrlProperty(
+                BROWSER_WEBHOOK_TEST_URL,
+                "浏览器 Webhook 测试地址",
+                "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}；会发送一条钉钉机器人测试消息。",
+                "/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}");
+        properties.add(browserWebhookTestUrl);
 
         return properties;
     }

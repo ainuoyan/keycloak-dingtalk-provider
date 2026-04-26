@@ -89,6 +89,45 @@ public class DingTalkSyncBrowserResource {
         return previewSyncCreatedUserCleanup(alias, key);
     }
 
+    @GET
+    @Path("test-webhook")
+    public Response testWebhook(@QueryParam("alias") String alias,
+                                @QueryParam("key") String key) {
+        RealmModel realm = session.getContext().getRealm();
+        if (realm == null) {
+            return json(Response.Status.NOT_FOUND, Map.of("error", "realm_not_found"));
+        }
+        if (StringUtils.isBlank(alias)) {
+            return json(Response.Status.BAD_REQUEST, Map.of("error", "alias_required"));
+        }
+
+        IdentityProviderModel idp = getDingTalkProvider(realm, alias);
+        if (idp == null) {
+            return json(Response.Status.NOT_FOUND, Map.of("error", "dingtalk_idp_not_found", "alias", alias));
+        }
+        Response forbidden = validateBrowserAccess(realm, idp, alias, key);
+        if (forbidden != null) {
+            return forbidden;
+        }
+        if (!DingTalkWebhookNotifier.isEnabled(idp)) {
+            return json(Response.Status.BAD_REQUEST, Map.of(
+                    "error", "webhook_disabled_or_url_missing",
+                    "alias", alias
+            ));
+        }
+
+        DingTalkWebhookNotifier.SendResult result = DingTalkWebhookNotifier.sendTest(session, realm, idp);
+        Response.Status status = result.success()
+                ? Response.Status.OK
+                : Response.Status.BAD_GATEWAY;
+        return json(status, Map.of(
+                "alias", alias,
+                "success", result.success(),
+                "error", result.error(),
+                "response", result.response()
+        ));
+    }
+
     @POST
     @Path("cleanup-sync-created-users")
     public Response cleanupSyncCreatedUsersPost(@QueryParam("alias") String alias,
