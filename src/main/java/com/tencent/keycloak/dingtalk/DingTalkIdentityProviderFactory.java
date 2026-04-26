@@ -18,6 +18,7 @@
 package com.tencent.keycloak.dingtalk;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.keycloak.broker.oidc.OAuth2IdentityProviderConfig;
@@ -26,6 +27,7 @@ import org.keycloak.broker.social.SocialIdentityProviderFactory;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
@@ -53,6 +55,8 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String MATCH_RULES = "matchRules";
     static final String SYNC_GET_DEBUG_ENABLED = "syncGetDebugEnabled";
     static final String BROWSER_SYNC_DEBUG_KEY = "browserSyncDebugKey";
+    static final String ENDPOINT_REFERENCE_PAGE_CONFIG = "dingtalkEndpointReferencePage";
+    static final String ENDPOINT_REFERENCE_PAGE_URL = "/realms/master/dingtalk-sync/endpoints";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
     private static final String ENDPOINT_REFERENCE_HELP =
@@ -61,9 +65,9 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
             "固定入口路径，不参与运行配置；打开后可在页面内切换 Realm 和选择钉钉 IdP。实际接口地址由页面选择的 Realm 生成。";
     private static final List<EndpointReference> ENDPOINT_REFERENCES = List.of(
             new EndpointReference(
-                    "dingtalkEndpointReferencePage",
+                    ENDPOINT_REFERENCE_PAGE_CONFIG,
                     "接口地址页面入口",
-                    "/realms/master/dingtalk-sync/endpoints"));
+                    ENDPOINT_REFERENCE_PAGE_URL));
 
     @Override
     public String getName() {
@@ -72,12 +76,15 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
 
     @Override
     public DingTalkIdentityProvider create(KeycloakSession session, IdentityProviderModel model) {
+        ensureEndpointReferenceConfig(model);
         return new DingTalkIdentityProvider(session, new OAuth2IdentityProviderConfig(model));
     }
 
     @Override
     public IdentityProviderModel createConfig() {
-        return new OAuth2IdentityProviderConfig();
+        OAuth2IdentityProviderConfig config = new OAuth2IdentityProviderConfig();
+        ensureEndpointReferenceConfig(config);
+        return config;
     }
 
     @Override
@@ -96,6 +103,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                         PERIODIC_SYNC_CHECK_INTERVAL_MS,
                         DingTalkUserSyncTask.TASK_NAME);
             }
+            persistEndpointReferenceConfig(session);
         });
     }
 
@@ -252,13 +260,41 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 reference.name(),
                 reference.label(),
                 ENDPOINT_REFERENCE_HELP_TEXT,
-                ProviderConfigProperty.STRING_TYPE,
+                ProviderConfigProperty.URL_TYPE,
                 reference.url());
         property.setReadOnly(true);
         return property;
     }
 
     private record EndpointReference(String name, String label, String url) {}
+
+    static boolean ensureEndpointReferenceConfig(IdentityProviderModel idp) {
+        if (idp == null) {
+            return false;
+        }
+        Map<String, String> config = idp.getConfig();
+        if (ENDPOINT_REFERENCE_PAGE_URL.equals(config == null ? null : config.get(ENDPOINT_REFERENCE_PAGE_CONFIG))) {
+            return false;
+        }
+        Map<String, String> updatedConfig = config == null ? new HashMap<>() : new HashMap<>(config);
+        updatedConfig.put(ENDPOINT_REFERENCE_PAGE_CONFIG, ENDPOINT_REFERENCE_PAGE_URL);
+        idp.setConfig(updatedConfig);
+        return true;
+    }
+
+    private void persistEndpointReferenceConfig(KeycloakSession session) {
+        List<RealmModel> realms = session.realms().getRealmsStream().toList();
+        for (RealmModel realm : realms) {
+            List<IdentityProviderModel> providers = realm.getIdentityProvidersStream()
+                    .filter(idp -> PROVIDER_ID.equals(idp.getProviderId()))
+                    .toList();
+            for (IdentityProviderModel provider : providers) {
+                if (ensureEndpointReferenceConfig(provider)) {
+                    realm.updateIdentityProvider(provider);
+                }
+            }
+        }
+    }
 
     static boolean isSyncGetDebugEnabled(IdentityProviderModel idp) {
         return idp != null && isSyncGetDebugEnabled(idp.getConfig());

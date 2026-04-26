@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.provider.ProviderConfigProperty;
 
 class DingTalkIdentityProviderTest {
 
@@ -270,6 +272,28 @@ class DingTalkIdentityProviderTest {
 
         assertEquals("2026-04-26 00:06:23 CST",
                 DingTalkUserSyncTask.formatBeijingTime(1777133183));
+    }
+
+    @Test
+    void endpointReferenceConfigUsesUrlTypeAndFixedRelativePath() {
+        ProviderConfigProperty property = new DingTalkIdentityProviderFactory().getConfigProperties().stream()
+                .filter(candidate -> DingTalkIdentityProviderFactory.ENDPOINT_REFERENCE_PAGE_CONFIG
+                        .equals(candidate.getName()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(ProviderConfigProperty.URL_TYPE, property.getType());
+        assertEquals(DingTalkIdentityProviderFactory.ENDPOINT_REFERENCE_PAGE_URL, property.getDefaultValue());
+        assertTrue(property.isReadOnly());
+
+        IdentityProviderModel idp = new IdentityProviderModel();
+        idp.setConfig(Map.of("existing", "value"));
+
+        assertTrue(DingTalkIdentityProviderFactory.ensureEndpointReferenceConfig(idp));
+        assertEquals(DingTalkIdentityProviderFactory.ENDPOINT_REFERENCE_PAGE_URL,
+                idp.getConfig().get(DingTalkIdentityProviderFactory.ENDPOINT_REFERENCE_PAGE_CONFIG));
+        assertEquals("value", idp.getConfig().get("existing"));
+        assertFalse(DingTalkIdentityProviderFactory.ensureEndpointReferenceConfig(idp));
     }
 
     @Test

@@ -183,7 +183,7 @@
 | `POST /cleanup-sync-created-users?alias={alias}&key={debugKey}` | dry-run 清理预览，不删除 |
 | `GET /test-webhook?alias={alias}&key={debugKey}` | 发送钉钉机器人测试消息 |
 
-后台 Identity Provider 配置页会显示一个固定的只读“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。插件不能在启动阶段依赖当前请求 realm，也不应在 `postInit` 中回写 IdP 配置；后台入口不含 `{realm}`，只作为页面入口。页面内部负责切换 Realm、选择 IdP、临时填写本次调试密钥，并把地址分成两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。提交不同 Realm 时服务端会跳转到对应 `/realms/<realm>/dingtalk-sync/endpoints`，真实接口地址由所选 Realm 的 REST Provider 路由决定。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件，也不能通过后端 SPI 把标准配置项渲染成链接按钮；因此插件页面承载访问和复制按钮。入口路径不参与运行配置。
+后台 Identity Provider 配置页会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。插件会把这个固定相对路径保存到钉钉 IdP config 的 `dingtalkEndpointReferencePage`，并用 Keycloak Admin UI 的 `URL_TYPE` 渲染为可点击入口；浏览器会按当前站点域名解析该相对路径。该后台入口不含 `{realm}`，只作为页面入口。页面内部负责切换 Realm、选择 IdP、临时填写本次调试密钥，并把地址分成两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。提交不同 Realm 时服务端会跳转到对应 `/realms/<realm>/dingtalk-sync/endpoints`，真实接口地址由所选 Realm 的 REST Provider 路由决定。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此插件页面承载访问和复制按钮。入口路径只用于后台展示，插件执行同步时不会读取它。
 
 ## 同步结果语义
 
