@@ -45,6 +45,9 @@ public class DingTalkSyncBrowserResource {
         if (idp == null) {
             return json(Response.Status.NOT_FOUND, Map.of("error", "dingtalk_idp_not_found", "alias", alias));
         }
+        if (!DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(idp)) {
+            return json(Response.Status.FORBIDDEN, Map.of("error", "get_debug_disabled", "alias", alias));
+        }
 
         String configuredKey = idp.getConfig().get(DingTalkIdentityProviderFactory.BROWSER_SYNC_DEBUG_KEY);
         if (StringUtils.isBlank(configuredKey)) {
@@ -137,6 +140,11 @@ public class DingTalkSyncBrowserResource {
                 .findFirst()
                 .orElse(null);
         if (idp == null) {
+            return null;
+        }
+        if (!DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(idp)) {
+            logger.warnf("Rejected DingTalk browser debug request because GET debug is disabled. realm=%s, idp=%s",
+                    realm.getName(), alias);
             return null;
         }
 

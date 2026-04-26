@@ -247,6 +247,9 @@ class DingTalkIdentityProviderTest {
         assertFalse(DingTalkIdentityProvider.isEnterpriseRoleGrantEnabled(Map.of()));
         assertTrue(DingTalkIdentityProvider.isEnterpriseRoleGrantEnabled(
                 Map.of("enableEnterpriseRoleGrant", "true")));
+        assertFalse(DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(Map.of()));
+        assertTrue(DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(
+                Map.of("syncGetDebugEnabled", "true")));
 
         assertEquals(Set.of("phone"), DingTalkUserSyncTask.parseSyncFields(null));
         assertEquals(Set.of("phone", "email"),

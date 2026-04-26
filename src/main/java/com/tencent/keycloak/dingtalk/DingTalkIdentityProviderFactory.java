@@ -19,6 +19,7 @@ package com.tencent.keycloak.dingtalk;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.keycloak.broker.oidc.OAuth2IdentityProviderConfig;
 import org.keycloak.broker.provider.AbstractIdentityProviderFactory;
 import org.keycloak.broker.social.SocialIdentityProviderFactory;
@@ -51,6 +52,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String MATCH_ACTION = "matchAction";
     private static final String MATCH_RULES = "matchRules";
     private static final String MANUAL_SYNC_URL = "manualSyncUrl";
+    static final String SYNC_GET_DEBUG_ENABLED = "syncGetDebugEnabled";
     static final String BROWSER_SYNC_DEBUG_KEY = "browserSyncDebugKey";
     private static final String BROWSER_SYNC_PREVIEW_URL = "browserSyncPreviewUrl";
 
@@ -199,9 +201,15 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(false)
                 .add()
+                .property().name(SYNC_GET_DEBUG_ENABLED)
+                .label("启用 GET 同步调试入口")
+                .helpText("默认关闭。开启后才允许使用浏览器公开 GET 预览、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响")
+                .type(ProviderConfigProperty.BOOLEAN_TYPE)
+                .defaultValue(false)
+                .add()
                 .property().name(BROWSER_SYNC_DEBUG_KEY)
                 .label("浏览器同步调试密钥")
-                .helpText("填写后启用纯浏览器 GET 预览入口。该入口只拉取钉钉并返回 dry-run 统计，不写入 Keycloak；真实同步请使用管理 API")
+                .helpText("配合“启用 GET 同步调试入口”使用。两者同时有效时才允许纯浏览器 GET 预览；该入口只拉取钉钉并返回 dry-run 统计，不写入 Keycloak")
                 .type(ProviderConfigProperty.PASSWORD)
                 .secret(true)
                 .add()
@@ -210,21 +218,29 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
         ProviderConfigProperty manualSyncUrl = new ProviderConfigProperty(
                 MANUAL_SYNC_URL,
                 "管理 API 同步地址",
-                "管理 API 支持 GET /admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC 或 POST 同一路径；会真实同步，需要 Authorization Bearer 管理端 token 和 manage-users 权限，普通浏览器地址栏直接访问通常会 401。",
+                "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；GET 真实同步仅在开启 GET 同步调试入口后可用，并额外要求 confirm=RUN_DINGTALK_SYNC。两者都需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
                 ProviderConfigProperty.STRING_TYPE,
-                "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC");
+                "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}");
         manualSyncUrl.setReadOnly(true);
         properties.add(manualSyncUrl);
 
         ProviderConfigProperty browserSyncPreviewUrl = new ProviderConfigProperty(
                 BROWSER_SYNC_PREVIEW_URL,
                 "浏览器同步预览地址",
-                "纯浏览器地址栏预览可访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；需要正确调试密钥，返回 dry-run 统计，不创建、更新、禁用用户。",
+                "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；返回 dry-run 统计，不创建、更新、禁用用户。",
                 ProviderConfigProperty.STRING_TYPE,
                 "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}");
         browserSyncPreviewUrl.setReadOnly(true);
         properties.add(browserSyncPreviewUrl);
 
         return properties;
+    }
+
+    static boolean isSyncGetDebugEnabled(IdentityProviderModel idp) {
+        return idp != null && isSyncGetDebugEnabled(idp.getConfig());
+    }
+
+    static boolean isSyncGetDebugEnabled(Map<String, String> config) {
+        return config != null && Boolean.parseBoolean(config.getOrDefault(SYNC_GET_DEBUG_ENABLED, "false"));
     }
 }

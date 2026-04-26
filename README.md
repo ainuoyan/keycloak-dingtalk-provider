@@ -144,11 +144,12 @@ services:
 | 定期同步禁用离职用户 | 默认关闭，开启后只禁用之前由当前钉钉同步任务标记为托管、但本次通讯录不存在的 Keycloak 用户 |
 | 定期同步重新启用返聘用户 | 默认开启，离职用户重新出现在钉钉通讯录时自动启用 |
 | 记录同步明细日志 | 默认关闭；开启后定时同步会记录每个钉钉用户的匹配来源、Keycloak 用户名、更新字段和跳过原因。手动同步会自动记录明细 |
-| 浏览器同步调试密钥 | 默认空，填写后启用纯浏览器 GET 预览入口。该入口只返回 dry-run 统计，不写入 Keycloak |
-| 管理 API 同步地址 | 只读提示项，显示管理 API 同步路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}&confirm=RUN_DINGTALK_SYNC`；GET/POST 都会真实同步，需要 Authorization Bearer 管理端 token 和 `manage-users` 权限，普通浏览器地址栏直接访问通常会 `401` |
-| 浏览器同步预览地址 | 只读提示项，显示纯浏览器 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}`；需要正确调试密钥 |
+| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响 |
+| 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览。该入口只返回 dry-run 统计，不写入 Keycloak |
+| 管理 API 同步地址 | 只读提示项，显示管理 API POST 同步路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}`；GET 真实同步仅在开启 GET 同步调试入口后可用，并额外要求 `confirm=RUN_DINGTALK_SYNC` |
+| 浏览器同步预览地址 | 只读提示项，显示纯浏览器 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}`；需要开启 GET 同步调试入口并填写正确调试密钥 |
 
-> `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览请使用 `/realms/{realm}/dingtalk-sync/debug?...&key=...`，并填写实际的“浏览器同步调试密钥”。
+> `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/debug?...&key=...`，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 
 > `登录后是否更新用户信息` 只控制 Provider 是否写回用户属性。它不会关闭 Keycloak 首次第三方登录流程里的 **Review Profile / Update Profile** 页面；如果 AD 用户已经同步完成，只希望钉钉按用户名或邮箱绑定已有用户，请复制 `first broker login` flow，禁用或删除其中的 `Review Profile` 执行项，然后在钉钉 Identity Provider 的 **First Login Flow** 里选择这个副本。
 
@@ -218,7 +219,7 @@ https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?***
 
 ### 手动触发钉钉同步
 
-插件提供了一个管理端手动同步入口，方便测试和排障。GET 和 POST 都会执行真实同步，并且都会先校验当前调用者是否具备当前 realm 的 `manage-users` 权限。为了避免浏览器误点或 CSRF 式误触发，GET 还要求显式追加 `confirm=RUN_DINGTALK_SYNC`。
+插件提供了一个管理端手动同步入口，方便测试和排障。POST 会执行真实同步，并且会先校验当前调用者是否具备当前 realm 的 `manage-users` 权限。GET 真实同步默认关闭；只有短期开启“启用 GET 同步调试入口”后才可用，并且还要求显式追加 `confirm=RUN_DINGTALK_SYNC`，避免浏览器误点或 CSRF 式误触发。
 
 ```bash
 curl -X POST \
@@ -226,7 +227,7 @@ curl -X POST \
   "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}"
 ```
 
-这个路径属于 Keycloak 管理 REST API，普通浏览器地址栏不会自动带上 `Authorization: Bearer ...`，直接打开通常会返回 `401`。如需用 GET 触发真实同步，请使用能设置 Bearer token 的调用方式：
+这个路径属于 Keycloak 管理 REST API，普通浏览器地址栏不会自动带上 `Authorization: Bearer ...`，直接打开通常会返回 `401`。如需用 GET 触发真实同步，需要同时满足：已开启“启用 GET 同步调试入口”、调用方能设置 Bearer token、具备 `manage-users` 权限、带上确认参数：
 
 ```text
 https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAlias}&confirm=RUN_DINGTALK_SYNC
@@ -234,21 +235,21 @@ https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAl
 
 `alias` 是钉钉 Identity Provider 的别名；如果不传 `alias`，会同步当前 realm 下所有启用的钉钉 Identity Provider。
 
-如果使用脚本或 API 客户端，也可以调用管理端 dry-run 预览入口。它同样需要 `Authorization: Bearer <admin-access-token>` 和当前 realm 的 `manage-users` 权限：
+如果使用脚本或 API 客户端，也可以调用管理端 dry-run 预览入口。它同样需要先开启“启用 GET 同步调试入口”，并提供 `Authorization: Bearer <admin-access-token>` 和当前 realm 的 `manage-users` 权限：
 
 ```text
 https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}
 ```
 
-如果需要不带 Admin Bearer token、直接在浏览器地址栏访问公开预览入口，请先在钉钉 Identity Provider 配置里填写“浏览器同步调试密钥”，然后访问：
+如果需要不带 Admin Bearer token、直接在浏览器地址栏访问公开预览入口，请先在钉钉 Identity Provider 配置里开启“启用 GET 同步调试入口”，并填写“浏览器同步调试密钥”，然后访问：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}&key={浏览器同步调试密钥}
 ```
 
-这两个预览入口都会调用钉钉接口并返回 `dryRun=true` 的统计和明细日志，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。公开预览入口要求 `alias` 和密钥都正确；密钥为空时入口禁用。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后清空。
+这两个预览入口都会调用钉钉接口并返回 `dryRun=true` 的统计和明细日志，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。公开预览入口要求开关、`alias` 和密钥都正确；密钥为空或开关关闭时入口禁用。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后关闭开关并清空密钥。
 
-如需清理早期错误同步产生的纯数字 username 用户，可以先使用受同一调试密钥保护的浏览器入口预览名单。它只会匹配同时满足以下条件的用户：当前钉钉 IDP 托管、已绑定当前钉钉 IDP、username 全数字，并且是同步创建用户或旧版 username 等于 `dingtalk_userid` 的用户。
+如需清理早期错误同步产生的纯数字 username 用户，可以先使用受同一 GET 调试开关和调试密钥保护的浏览器入口预览名单。它只会匹配同时满足以下条件的用户：当前钉钉 IDP 托管、已绑定当前钉钉 IDP、username 全数字，并且是同步创建用户或旧版 username 等于 `dingtalk_userid` 的用户。
 
 先 dry-run 查看名单：
 
@@ -268,7 +269,7 @@ curl -X POST \
   "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/cleanup-numeric-users?alias={idpAlias}&confirm=DELETE_NUMERIC_DINGTALK_USERS"
 ```
 
-旧的浏览器 POST 地址也只会返回 dry-run 结果，不会执行删除：
+旧的浏览器 POST 地址同样受“启用 GET 同步调试入口”和调试密钥保护，并且只会返回 dry-run 结果，不会执行删除：
 
 ```bash
 curl -X POST \

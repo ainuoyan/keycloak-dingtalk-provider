@@ -1,5 +1,6 @@
 package com.tencent.keycloak.dingtalk;
 
+import java.util.List;
 import java.util.Map;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -35,20 +36,24 @@ public class DingTalkSyncAdminResource {
     @POST
     @Path("run")
     public Response run(@QueryParam("alias") String alias) throws Exception {
-        return runSync(alias, false, null);
+        return runSync(alias, false, null, false);
     }
 
     @GET
     @Path("run")
     public Response runFromBrowser(@QueryParam("alias") String alias,
                                    @QueryParam("confirm") String confirm) throws Exception {
-        return runSync(alias, true, confirm);
+        return runSync(alias, true, confirm, true);
     }
 
     @GET
     @Path("debug")
     public Response previewSync(@QueryParam("alias") String alias) throws Exception {
         auth.users().requireManage();
+        Response disabled = requireGetDebugEnabled(alias);
+        if (disabled != null) {
+            return disabled;
+        }
 
         RealmModel previousRealm = session.getContext().getRealm();
         try {
@@ -81,8 +86,14 @@ public class DingTalkSyncAdminResource {
         return cleanupNumericUsers(alias, confirm, true);
     }
 
-    private Response runSync(String alias, boolean requireConfirm, String confirm) throws Exception {
+    private Response runSync(String alias, boolean requireConfirm, String confirm, boolean getRequest) throws Exception {
         auth.users().requireManage();
+        if (getRequest) {
+            Response disabled = requireGetDebugEnabled(alias);
+            if (disabled != null) {
+                return disabled;
+            }
+        }
         if (requireConfirm && !RUN_CONFIRM.equals(confirm)) {
             return json(Response.Status.BAD_REQUEST, Map.of(
                     "error", "confirm_required",
@@ -136,6 +147,9 @@ public class DingTalkSyncAdminResource {
             if (idp == null) {
                 return json(Response.Status.NOT_FOUND, Map.of("error", "dingtalk_idp_not_found", "alias", alias));
             }
+            if (!execute && !DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(idp)) {
+                return getDebugDisabledResponse(List.of(idp.getAlias()));
+            }
             if (execute && !DingTalkNumericUserCleanup.CONFIRM.equals(confirm)) {
                 return json(Response.Status.BAD_REQUEST, Map.of(
                         "error", "confirm_required",
@@ -168,12 +182,43 @@ public class DingTalkSyncAdminResource {
     }
 
     private IdentityProviderModel getDingTalkProvider(String alias) {
+        return getDingTalkProviders(alias).stream()
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<IdentityProviderModel> getDingTalkProviders(String alias) {
         return realm.getIdentityProvidersStream()
                 .filter(provider -> DingTalkIdentityProviderFactory.PROVIDER_ID.equals(provider.getProviderId()))
                 .filter(IdentityProviderModel::isEnabled)
-                .filter(provider -> alias.equals(provider.getAlias()))
-                .findFirst()
-                .orElse(null);
+                .filter(provider -> StringUtils.isBlank(alias) || alias.equals(provider.getAlias()))
+                .toList();
+    }
+
+    private Response requireGetDebugEnabled(String alias) {
+        List<IdentityProviderModel> providers = getDingTalkProviders(alias);
+        if (providers.isEmpty()) {
+            return json(Response.Status.NOT_FOUND, Map.of(
+                    "error", "dingtalk_idp_not_found",
+                    "alias", StringUtils.defaultString(alias)
+            ));
+        }
+
+        List<String> disabledAliases = providers.stream()
+                .filter(provider -> !DingTalkIdentityProviderFactory.isSyncGetDebugEnabled(provider))
+                .map(IdentityProviderModel::getAlias)
+                .toList();
+        if (!disabledAliases.isEmpty()) {
+            return getDebugDisabledResponse(disabledAliases);
+        }
+        return null;
+    }
+
+    private Response getDebugDisabledResponse(List<String> aliases) {
+        return json(Response.Status.FORBIDDEN, Map.of(
+                "error", "get_debug_disabled",
+                "aliases", aliases
+        ));
     }
 
     private Response json(Response.Status status, Map<String, Object> body) {
