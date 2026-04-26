@@ -51,17 +51,19 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
     private static final String ENABLE_ENTERPRISE_ROLE_GRANT = DingTalkIdentityProvider.ENABLE_ENTERPRISE_ROLE_GRANT;
     private static final String MATCH_ACTION = "matchAction";
     private static final String MATCH_RULES = "matchRules";
-    private static final String MANUAL_SYNC_URL = "manualSyncUrl";
     static final String SYNC_GET_DEBUG_ENABLED = "syncGetDebugEnabled";
     static final String BROWSER_SYNC_DEBUG_KEY = "browserSyncDebugKey";
-    private static final String BROWSER_SYNC_RUN_URL = "browserSyncRunUrl";
-    private static final String BROWSER_SYNC_PREVIEW_URL = "browserSyncPreviewUrl";
-    private static final String BROWSER_SYNC_CLEANUP_PREVIEW_URL = "browserSyncCleanupPreviewUrl";
-    private static final String ADMIN_SYNC_CLEANUP_EXECUTE_URL = "adminSyncCleanupExecuteUrl";
-    private static final String ADMIN_WEBHOOK_TEST_URL = "adminWebhookTestUrl";
-    private static final String BROWSER_WEBHOOK_TEST_URL = "browserWebhookTestUrl";
 
     private static final long PERIODIC_SYNC_CHECK_INTERVAL_MS = 60_000L;
+    private static final String ENDPOINT_REFERENCE_HELP =
+            "接口地址模板仅作为说明展示，不会保存为配置项："
+                    + "管理 API 同步 POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；"
+                    + "浏览器同步执行 GET /realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC；"
+                    + "浏览器同步预览 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；"
+                    + "浏览器清理同步创建用户预览 GET /realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}；"
+                    + "管理 API 清理同步创建用户执行 POST /admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS；"
+                    + "管理 API Webhook 测试 POST /admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}；"
+                    + "浏览器 Webhook 测试 GET /realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}。";
 
     @Override
     public String getName() {
@@ -226,7 +228,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .property().name(SYNC_GET_DEBUG_ENABLED)
                 .label("启用 GET 同步调试入口")
-                .helpText("默认关闭。开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响")
+                .helpText("默认关闭。开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。" + ENDPOINT_REFERENCE_HELP)
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue(false)
                 .add()
@@ -238,67 +240,7 @@ public class DingTalkIdentityProviderFactory extends AbstractIdentityProviderFac
                 .add()
                 .build());
 
-        ProviderConfigProperty manualSyncUrl = readOnlyUrlProperty(
-                MANUAL_SYNC_URL,
-                "管理 API 同步地址",
-                "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/run?alias={alias}；GET 真实同步仅在开启 GET 同步调试入口后可用，并额外要求 confirm=RUN_DINGTALK_SYNC。两者都需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
-                "/admin/realms/{realm}/dingtalk-sync/run?alias={alias}");
-        properties.add(manualSyncUrl);
-
-        ProviderConfigProperty browserSyncRunUrl = readOnlyUrlProperty(
-                BROWSER_SYNC_RUN_URL,
-                "浏览器同步执行地址",
-                "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC；会真实同步并写入 Keycloak。",
-                "/realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC");
-        properties.add(browserSyncRunUrl);
-
-        ProviderConfigProperty browserSyncPreviewUrl = readOnlyUrlProperty(
-                BROWSER_SYNC_PREVIEW_URL,
-                "浏览器同步预览地址",
-                "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}；返回 dry-run 统计，不创建、更新、禁用用户。",
-                "/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}");
-        properties.add(browserSyncPreviewUrl);
-
-        ProviderConfigProperty browserSyncCleanupPreviewUrl = readOnlyUrlProperty(
-                BROWSER_SYNC_CLEANUP_PREVIEW_URL,
-                "浏览器清理同步创建用户预览地址",
-                "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}；只返回 dry-run 名单，不删除用户。",
-                "/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}");
-        properties.add(browserSyncCleanupPreviewUrl);
-
-        ProviderConfigProperty adminSyncCleanupExecuteUrl = readOnlyUrlProperty(
-                ADMIN_SYNC_CLEANUP_EXECUTE_URL,
-                "管理 API 清理同步创建用户执行地址",
-                "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS；会删除当前钉钉 IdP 同步创建的用户，需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
-                "/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS");
-        properties.add(adminSyncCleanupExecuteUrl);
-
-        ProviderConfigProperty adminWebhookTestUrl = readOnlyUrlProperty(
-                ADMIN_WEBHOOK_TEST_URL,
-                "管理 API Webhook 测试地址",
-                "管理 API 支持 POST /admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}；会发送一条钉钉机器人测试消息，需要 Authorization Bearer 管理端 token 和 manage-users 权限。",
-                "/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}");
-        properties.add(adminWebhookTestUrl);
-
-        ProviderConfigProperty browserWebhookTestUrl = readOnlyUrlProperty(
-                BROWSER_WEBHOOK_TEST_URL,
-                "浏览器 Webhook 测试地址",
-                "开启 GET 同步调试入口并配置正确密钥后，可在浏览器地址栏访问 GET /realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}；会发送一条钉钉机器人测试消息。",
-                "/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}");
-        properties.add(browserWebhookTestUrl);
-
         return properties;
-    }
-
-    private ProviderConfigProperty readOnlyUrlProperty(String name, String label, String helpText, String value) {
-        ProviderConfigProperty property = new ProviderConfigProperty(
-                name,
-                label,
-                helpText,
-                ProviderConfigProperty.STRING_TYPE,
-                value);
-        property.setReadOnly(true);
-        return property;
     }
 
     static boolean isSyncGetDebugEnabled(IdentityProviderModel idp) {

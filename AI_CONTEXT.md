@@ -182,15 +182,7 @@
 | `POST /cleanup-sync-created-users?alias={alias}&key={debugKey}` | dry-run 清理预览，不删除 |
 | `GET /test-webhook?alias={alias}&key={debugKey}` | 发送钉钉机器人测试消息 |
 
-后台 Identity Provider 配置页会显示以下只读 URL 提示项：
-
-- 管理 API 同步地址
-- 浏览器同步执行地址
-- 浏览器同步预览地址
-- 浏览器清理同步创建用户预览地址
-- 管理 API 清理同步创建用户执行地址
-- 管理 API Webhook 测试地址
-- 浏览器 Webhook 测试地址
+后台 Identity Provider 配置页不再把接口地址作为可保存配置项暴露。地址模板集中放在“启用 GET 同步调试入口”的说明文本中，避免 Keycloak 管理台把 display-only 字段渲染成可编辑输入框后被误保存。
 
 ## 同步结果语义
 

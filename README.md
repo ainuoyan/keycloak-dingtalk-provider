@@ -167,15 +167,10 @@ services:
 | 启用钉钉机器人通知 | 默认关闭；开启并配置 Webhook 后，登录链路新创建用户、同步真实执行中新创建用户，以及同步真实执行中因 `username` 为空或 `username` 冲突跳过创建的 WARN 会发送到钉钉机器人 |
 | 钉钉机器人 Webhook 地址 | 钉钉自定义机器人 Webhook 地址，通常包含 `access_token`，按敏感字段保存；为空时不发送通知 |
 | 钉钉机器人加签密钥 | 如果钉钉机器人启用了加签安全设置，填写 `SEC...` 密钥；未启用加签时留空 |
-| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响 |
+| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址模板会显示在该配置项说明里，不作为可保存配置项 |
 | 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览和正式同步 |
-| 管理 API 同步地址 | 只读提示项，显示管理 API POST 同步路径 `/admin/realms/{realm}/dingtalk-sync/run?alias={alias}`；GET 真实同步仅在开启 GET 同步调试入口后可用，并额外要求 `confirm=RUN_DINGTALK_SYNC` |
-| 浏览器同步执行地址 | 只读提示项，显示纯浏览器 GET 正式同步路径 `/realms/{realm}/dingtalk-sync/run?alias={alias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC`；会真实同步，需要开启 GET 同步调试入口并填写正确调试密钥 |
-| 浏览器同步预览地址 | 只读提示项，显示纯浏览器 GET 预览路径 `/realms/{realm}/dingtalk-sync/debug?alias={alias}&key={浏览器同步调试密钥}`；需要开启 GET 同步调试入口并填写正确调试密钥 |
-| 浏览器清理同步创建用户预览地址 | 只读提示项，显示纯浏览器 GET 清理预览路径 `/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&key={浏览器同步调试密钥}`；只返回 dry-run 名单，不删除用户 |
-| 管理 API 清理同步创建用户执行地址 | 只读提示项，显示管理 API POST 清理路径 `/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={alias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS`；会删除当前钉钉 IdP 同步创建的用户，需要管理端 token 和 `manage-users` 权限 |
-| 管理 API Webhook 测试地址 | 只读提示项，显示管理 API POST Webhook 测试路径 `/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}`；会发送一条测试消息，需要管理端 token 和 `manage-users` 权限 |
-| 浏览器 Webhook 测试地址 | 只读提示项，显示纯浏览器 GET Webhook 测试路径 `/realms/{realm}/dingtalk-sync/test-webhook?alias={alias}&key={浏览器同步调试密钥}`；会发送一条测试消息，需要开启 GET 同步调试入口并填写正确调试密钥 |
+
+> 接口地址模板只显示在“启用 GET 同步调试入口”的说明文本里，不再作为 `manualSyncUrl`、`browserSyncRunUrl` 这类可保存配置项暴露。Keycloak 26 的 Identity Provider 配置页不会可靠禁止这些自定义字段编辑，因此插件改为不提供这些输入框，避免有人把提示地址保存成错误值。
 
 > `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
 
