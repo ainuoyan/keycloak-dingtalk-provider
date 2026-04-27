@@ -41,7 +41,7 @@ keycloak-dingtalk-provider/
 │   ├── DingTalkSyncAdminResource.java                  # 管理端同步、清理、Webhook 测试 REST 入口
 │   ├── DingTalkSyncAdminResourceProvider.java          # 管理端 REST Provider
 │   ├── DingTalkSyncAdminResourceProviderFactory.java   # 管理端 REST Provider Factory
-│   ├── DingTalkSyncBrowserResource.java                # 浏览器公开地址页面和调试入口，执行型入口受 GET 调试开关和密钥保护
+│   ├── DingTalkSyncBrowserResource.java                # 浏览器接口地址页面和调试入口，页面与执行型入口都要求登录，执行型入口受 GET 调试开关和密钥保护
 │   ├── DingTalkSyncBrowserResourceProvider.java        # 浏览器公开 REST Provider
 │   ├── DingTalkSyncBrowserResourceProviderFactory.java # 浏览器公开 REST Provider Factory
 │   ├── DingTalkSyncCreatedUserCleanup.java             # 清理由钉钉同步自动创建的用户
@@ -171,14 +171,14 @@ services:
 | 启用钉钉机器人通知 | 默认关闭；开启并配置 Webhook 后，登录链路新创建用户、同步真实执行中新创建用户，以及同步真实执行中因用户名为空或用户名冲突跳过创建的告警会发送到钉钉机器人 |
 | 钉钉机器人 Webhook 地址 | 钉钉自定义机器人 Webhook 地址，通常包含 `access_token`，按敏感字段保存；为空时不发送通知 |
 | 钉钉机器人加签密钥 | 如果钉钉机器人启用了加签安全设置，填写 `SEC...` 密钥；未启用加签时留空 |
-| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用浏览器公开 GET 预览、浏览器公开 GET 真实同步、浏览器公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址可通过后台下方的“接口地址页面入口”查看 |
-| 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”使用；两者同时有效时才允许纯浏览器 GET 预览、正式同步和 Webhook 测试 |
+| 启用 GET 同步调试入口 | 默认关闭；开启后才允许使用已登录浏览器会话中的公开 GET 预览、公开 GET 真实同步、公开 GET Webhook 测试、管理端 GET dry-run 和管理端 GET 真实同步。调试完成后请关闭；管理端 POST 同步不受影响。接口地址可通过后台下方的“接口地址页面入口”查看 |
+| 浏览器同步调试密钥 | 默认空，配合“启用 GET 同步调试入口”和 Keycloak 登录态使用；三者同时有效时才允许浏览器 GET 预览、正式同步和 Webhook 测试 |
 
-> 后台会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这个路径只作为页面入口，不参与同步运行配置；插件会在钉钉 IdP config 中补齐同名固定值和 `value` 固定值，原因是 Keycloak 26 管理台的 `URL_TYPE` 组件只从表单对象的 `value` 字段生成链接，不读取 `defaultValue`。已有钉钉 IdP 会在启动事务里按 Realm 上下文受控补齐，后续启动不会重复写入。浏览器会按当前站点域名解析该相对路径。打开页面后可以在页面内填写/切换 Realm、选择钉钉 IdP、临时填写本次浏览器同步调试密钥。页面会把地址分为两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由页面选择的 Realm 对应 REST Provider 路由决定。
+> 后台会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这个路径只作为页面入口，不参与同步运行配置；插件会在钉钉 IdP config 中补齐同名固定值和 `value` 固定值，原因是 Keycloak 26 管理台的 `URL_TYPE` 组件只从表单对象的 `value` 字段生成链接，不读取 `defaultValue`。已有钉钉 IdP 会在启动事务里按 Realm 上下文受控补齐，后续启动不会重复写入。浏览器会按当前站点域名解析该相对路径。打开页面前必须已登录该路径所属 Realm；未登录请求会返回 `401`，不会展示钉钉 IdP alias 或 GET 调试开关状态。打开页面后可以在页面内填写/切换 Realm、选择钉钉 IdP、临时填写本次浏览器同步调试密钥。页面会把地址分为两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。页面本身只展示地址，不会自动执行同步、清理或发信；真实接口地址始终由页面选择的 Realm 对应 REST Provider 路由决定。
 
 > Keycloak 内置的“重定向 URI”是管理台前端专门硬编码的复制组件，自定义 Provider 配置项不能复用该复制组件。插件因此在配置页用 `URL_TYPE` 放一个固定相对路径入口，访问按钮和复制按钮放在插件自己的接口地址页面里。该入口路径只用于后台展示，插件执行同步时不会读取它；补齐固定值只为让管理台链接可点击。
 
-> `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`。
+> `/admin/realms/...` 属于 Keycloak 管理 REST API，浏览器地址栏直接 GET 通常会返回 `401`，即使你已经打开了管理台页面。地址栏直接预览或正式同步请先在浏览器中登录对应 Realm，短期开启“启用 GET 同步调试入口”，再使用 `/realms/{realm}/dingtalk-sync/...` 的浏览器地址，并填写实际的“浏览器同步调试密钥”。调试完成后关闭该开关，GET 入口会返回 `403 get_debug_disabled`；未登录时会先返回 `401 login_required`。
 
 > `登录后是否更新用户信息` 只控制 Provider 是否写回用户属性。它不会关闭 Keycloak 首次第三方登录流程里的 **Review Profile / Update Profile** 页面；如果 AD 用户已经同步完成，只希望钉钉按用户名或邮箱绑定已有用户，请复制 `first broker login` flow，禁用或删除其中的 `Review Profile` 执行项，然后在钉钉 Identity Provider 的 **First Login Flow** 里选择这个副本。
 
@@ -200,17 +200,17 @@ AD 已同步用户的推荐配置：
 - `定期同步重新启用返聘用户`：开启；仅用于恢复之前由本插件离职禁用的用户
 - First Login Flow：使用禁用了 `Review Profile` 的自定义 flow
 
-定期同步开启后，任务会按下面顺序处理每个钉钉通讯录用户：
+定期同步开启后，任务会按下面顺序执行：
 
 1. 把“定期同步部门ID”视为根部门；开启“同步子部门用户”时，递归获取所有下级部门 ID。
 2. 逐个部门拉取用户，并按钉钉外部 ID 去重，避免同一用户在多个部门里重复处理。
-3. 先查是否已经绑定当前钉钉 Identity Provider。
-4. 未绑定时，按“匹配规则配置”的顺序匹配已有 Keycloak 用户，例如 `phone,email` 会先查手机号，再查邮箱；同一手机号、邮箱或候选用户名匹配到多个用户时会拒绝绑定并记录 WARN，避免错绑。
-5. 匹配成功后补充钉钉 federated identity 绑定，并标记为当前钉钉 IDP 托管用户。
-6. 匹配失败但开启“定期同步重新启用返聘用户”时，如果本轮钉钉资料推导出的 username 候选命中了之前由本插件按 `missing_from_dingtalk` 禁用的账号，会按返聘账号处理并进入重新启用、绑定和更新流程；普通 username 冲突不会被当作可信匹配。
-7. 匹配失败且开启“定期同步自动创建用户”时，按姓名拼音规则创建 Keycloak 用户，并绑定钉钉身份。
-8. 按“定期同步字段”和“定期同步覆盖已有字段”更新 `phoneNumber`、`email`；同时始终记录 `nickname`、`dingtalk_userid`、`dingtalk_last_sync_at` 等钉钉身份和排障属性。
-9. 开启“定期同步禁用离职用户”时，仅禁用此前由当前钉钉 IdP 托管或已绑定当前钉钉 IdP、但本次完整通讯录中不存在的用户。
+3. 如开启“定期同步禁用离职用户”，先用本轮完整通讯录做缺失扫描；任一部门拉取失败或本轮没有有效钉钉身份时会跳过禁用。该扫描发生在本轮用户字段写入、federated identity 绑定和 lastSync 更新时间戳写入之前。
+4. 对本轮钉钉用户逐个查找是否已经绑定当前钉钉 Identity Provider。
+5. 未绑定时，按“匹配规则配置”的顺序匹配已有 Keycloak 用户，例如 `phone,email` 会先查手机号，再查邮箱；同一手机号、邮箱或候选用户名匹配到多个用户时会拒绝绑定并记录 WARN，避免错绑。
+6. 匹配成功后补充钉钉 federated identity 绑定，并标记为当前钉钉 IDP 托管用户。
+7. 匹配失败但开启“定期同步重新启用返聘用户”时，如果本轮钉钉资料推导出的 username 候选命中了之前由本插件按 `missing_from_dingtalk` 禁用的账号，会按返聘账号处理并进入重新启用、绑定和更新流程；普通 username 冲突不会被当作可信匹配。
+8. 匹配失败且开启“定期同步自动创建用户”时，按姓名拼音规则创建 Keycloak 用户，并绑定钉钉身份。
+9. 按“定期同步字段”和“定期同步覆盖已有字段”更新 `phoneNumber`、`email`；同时始终记录 `nickname`、`dingtalk_userid`、`dingtalk_last_sync_at` 等钉钉身份和排障属性。
 
 默认只同步 `phoneNumber` 且不覆盖已有值，适合 AD 没有手机号、Keycloak 只需要从钉钉补齐手机号的场景。
 
@@ -260,7 +260,7 @@ https://sso.example.com/auth/realms/demo/broker/dingtalk/endpoint?***
 https://your-keycloak-domain/realms/master/dingtalk-sync/endpoints?realm={realm}&alias={idpAlias}
 ```
 
-后台入口默认使用 `master` 作为固定页面入口；页面里的 `realm` 字段才决定最终生成哪一个 Realm 的接口地址。提交表单时如果填写的 Realm 和当前路径不同，服务端会跳转到对应的 `/realms/<realm>/dingtalk-sync/endpoints` 页面。`alias` 可以省略，当前 Realm 只有一个启用的钉钉 IdP 时页面会自动选中，否则需要在页面里选择或在 URL 中传入。
+接口地址页面要求当前浏览器已登录该路径所属 Realm；未登录时返回 `401`，不会展示钉钉 IdP alias 或 GET 调试开关状态。后台入口默认使用 `master` 作为固定页面入口；页面里的 `realm` 字段才决定最终生成哪一个 Realm 的接口地址。提交表单时如果填写的 Realm 和当前路径不同，服务端会跳转到对应的 `/realms/<realm>/dingtalk-sync/endpoints` 页面。`alias` 可以省略，当前 Realm 只有一个启用的钉钉 IdP 时页面会自动选中，否则需要在页面里选择或在 URL 中传入。
 
 如果在 URL 中追加本次调试密钥，页面会为浏览器 GET 入口显示“访问”按钮；POST API 入口仍显示“复制地址”按钮：
 
@@ -290,7 +290,7 @@ https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/run?alias={idpAl
 https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}
 ```
 
-如果需要不带 Admin Bearer token、直接在浏览器地址栏访问公开预览入口，请先在钉钉 Identity Provider 配置里开启“启用 GET 同步调试入口”，并填写“浏览器同步调试密钥”，然后访问：
+如果需要不带 Admin Bearer token、直接在浏览器地址栏访问公开预览入口，请先确保浏览器已登录该路径所属 Realm，在钉钉 Identity Provider 配置里开启“启用 GET 同步调试入口”，并填写“浏览器同步调试密钥”，然后访问：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}&key={浏览器同步调试密钥}
@@ -302,7 +302,7 @@ https://your-keycloak-domain/realms/{realm}/dingtalk-sync/debug?alias={idpAlias}
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/run?alias={idpAlias}&key={浏览器同步调试密钥}&confirm=RUN_DINGTALK_SYNC
 ```
 
-两个预览入口都会调用钉钉接口并返回 `dryRun=true` 的统计，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。浏览器执行入口返回 `dryRun=false` 并执行真实同步。公开浏览器入口要求开关、`alias` 和密钥都正确；密钥为空或开关关闭时入口禁用。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后关闭开关并清空密钥。
+两个预览入口都会调用钉钉接口并返回 `dryRun=true` 的统计，但不会创建、绑定、更新、禁用 Keycloak 用户，也不会写入 lastSync。浏览器执行入口返回 `dryRun=false` 并执行真实同步。公开浏览器入口要求 Keycloak 登录态、开关、`alias` 和密钥都正确；未登录时返回 `401 login_required`，密钥为空或开关关闭时入口禁用。调试密钥会出现在浏览器历史、反向代理访问日志和截图里，建议只在测试期临时启用，调试完成后关闭开关并清空密钥。
 
 如需清理由当前钉钉 IDP 同步创建到 Keycloak 的用户，可以先使用受同一 GET 调试开关和调试密钥保护的浏览器入口预览名单。它只会匹配同时满足以下条件的用户：当前钉钉 IDP 托管、已绑定当前钉钉 IDP，并且带有 `dingtalk_created_by_sync=true` 标记。仅被钉钉同步匹配、绑定或更新过的既有 Keycloak/AD 用户不会被纳入删除名单。为兼容 AD create-only 流程，新版同步创建不再在创建后补写该标记，因此清理入口仍只处理历史已标记用户或管理员显式保留该标记的用户。
 
@@ -326,7 +326,7 @@ curl -X POST \
   "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/cleanup-sync-created-users?alias={idpAlias}&confirm=DELETE_DINGTALK_SYNC_CREATED_USERS"
 ```
 
-浏览器 POST 地址同样受“启用 GET 同步调试入口”和调试密钥保护，并且只会返回 dry-run 结果，不会执行删除：
+浏览器 POST 地址同样要求 Keycloak 登录态，并受“启用 GET 同步调试入口”和调试密钥保护，只会返回 dry-run 结果，不会执行删除：
 
 ```bash
 curl -X POST \
@@ -383,13 +383,13 @@ curl -X POST \
   "https://your-keycloak-domain/admin/realms/{realm}/dingtalk-sync/test-webhook?alias={idpAlias}"
 ```
 
-如果只是临时在浏览器地址栏测试发信，可以先开启“启用 GET 同步调试入口”并配置“浏览器同步调试密钥”，然后访问：
+如果只是临时在浏览器地址栏测试发信，可以先确保浏览器已登录该路径所属 Realm，开启“启用 GET 同步调试入口”并配置“浏览器同步调试密钥”，然后访问：
 
 ```text
 https://your-keycloak-domain/realms/{realm}/dingtalk-sync/test-webhook?alias={idpAlias}&key={浏览器同步调试密钥}
 ```
 
-这个浏览器 GET 测试入口会真实发送一条钉钉机器人消息。调试完成后请关闭“启用 GET 同步调试入口”并清空调试密钥。
+这个浏览器 GET 测试入口会真实发送一条钉钉机器人消息，并要求 Keycloak 登录态。调试完成后请关闭“启用 GET 同步调试入口”并清空调试密钥。
 
 成功时返回：
 
@@ -623,7 +623,7 @@ docker restart keycloak
 ERROR: Cannot invoke "Object.equals(Object)" because "currentRealm" is null
 ```
 
-**原因**：Provider 启动阶段没有浏览器请求上下文，任何启动期 Realm 遍历或 IdP 配置补齐都必须显式设置并恢复 Realm context；否则 Keycloak 内部代码可能遇到空 `currentRealm`。当前版本会为后台固定入口补齐 `dingtalkEndpointReferencePage` 和 `value` 固定值，以适配 Keycloak 26 管理台 `URL_TYPE` 链接生成逻辑，并在每个 Realm 更新前后恢复原始 context。该固定入口只用于后台展示，不参与同步运行配置；接口地址页面打开后可切换 Realm，最终仍通过 `/realms/<realm>/dingtalk-sync/endpoints` 运行时请求路径生成实际地址。
+**原因**：Provider 启动阶段没有浏览器请求上下文，任何启动期 Realm 遍历或 IdP 配置补齐都必须显式设置并恢复 Realm context；否则 Keycloak 内部代码可能遇到空 `currentRealm`。当前版本会为后台固定入口补齐 `dingtalkEndpointReferencePage` 和 `value` 固定值，以适配 Keycloak 26 管理台 `URL_TYPE` 链接生成逻辑，并在每个 Realm 更新前后恢复原始 context。该固定入口只用于后台展示，不参与同步运行配置；接口地址页面要求 Keycloak 已登录用户，打开后可切换 Realm，最终仍通过 `/realms/<realm>/dingtalk-sync/endpoints` 运行时请求路径生成实际地址。
 
 **解决方案**：确认使用的是会显式维护 Realm context 的新 JAR，替换后重新执行 `kc.sh build` 并重启 Keycloak；日志里不应再出现 `currentRealm is null`。
 

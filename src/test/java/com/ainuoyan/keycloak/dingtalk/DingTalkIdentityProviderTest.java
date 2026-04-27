@@ -30,6 +30,7 @@ import org.keycloak.models.SubjectCredentialManager;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserProvider;
 import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.storage.ReadOnlyException;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.UserStorageProviderModel;
@@ -1219,8 +1220,13 @@ class DingTalkIdentityProviderTest {
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
 
-        DingTalkSyncBrowserResource.BrowserJsonResponse response = new DingTalkSyncBrowserResource(session)
-                .previewSyncCreatedUserCleanupJson("dingtalk", "secret-key");
+        DingTalkSyncBrowserResource.BrowserJsonResponse response = new DingTalkSyncBrowserResource(session) {
+            @Override
+            AuthenticationManager.AuthResult authenticateBrowserRequest(RealmModel authenticatedRealm) {
+                assertSame(realm, authenticatedRealm);
+                return new AuthenticationManager.AuthResult(null, null, null, null);
+            }
+        }.previewSyncCreatedUserCleanupJson("dingtalk", "secret-key");
 
         assertEquals(Response.Status.INTERNAL_SERVER_ERROR, response.status());
         Map<String, Object> entity = response.body();
@@ -1234,6 +1240,98 @@ class DingTalkIdentityProviderTest {
         assertFalse(entityText.contains("employee@example.com"));
         assertFalse(entityText.contains("token-123"));
         assertFalse(entityText.contains("LDAP failure"));
+    }
+
+    @Test
+    void endpointsPageRequiresLoginBeforeShowingProviderAliases() {
+        RealmModel realm = (RealmModel) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {RealmModel.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getName" -> "master";
+                    case "getIdentityProvidersStream" -> throw new AssertionError(
+                            "anonymous endpoints page must not enumerate providers");
+                    case "toString" -> "master";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        KeycloakContext context = (KeycloakContext) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {KeycloakContext.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getRealm" -> realm;
+                    case "toString" -> "context";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        KeycloakSession session = (KeycloakSession) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {KeycloakSession.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getContext" -> context;
+                    case "toString" -> "session";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        DingTalkSyncBrowserResource resource = new DingTalkSyncBrowserResource(session) {
+            @Override
+            AuthenticationManager.AuthResult authenticateBrowserRequest(RealmModel authenticatedRealm) {
+                assertSame(realm, authenticatedRealm);
+                return null;
+            }
+        };
+
+        DingTalkSyncBrowserResource.BrowserHtmlResponse response = resource.endpointsPageLoginGuard(realm);
+
+        assertEquals(Response.Status.UNAUTHORIZED, response.status());
+        String html = response.body();
+        assertTrue(html.contains("需要先登录 Keycloak"));
+        assertTrue(html.contains("master"));
+        assertFalse(html.contains("dingtalk</option>"));
+        assertFalse(html.contains("debug-key"));
+    }
+
+    @Test
+    void browserApiRequiresLoginBeforeCheckingProviderAliases() {
+        RealmModel realm = (RealmModel) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {RealmModel.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getName" -> "master";
+                    case "getIdentityProvidersStream" -> throw new AssertionError(
+                            "anonymous browser API must not enumerate providers");
+                    case "toString" -> "master";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        KeycloakContext context = (KeycloakContext) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {KeycloakContext.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getRealm" -> realm;
+                    case "toString" -> "context";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        KeycloakSession session = (KeycloakSession) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {KeycloakSession.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getContext" -> context;
+                    case "toString" -> "session";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        DingTalkSyncBrowserResource resource = new DingTalkSyncBrowserResource(session) {
+            @Override
+            AuthenticationManager.AuthResult authenticateBrowserRequest(RealmModel authenticatedRealm) {
+                assertSame(realm, authenticatedRealm);
+                return null;
+            }
+        };
+
+        DingTalkSyncBrowserResource.BrowserJsonResponse response =
+                resource.previewSyncCreatedUserCleanupJson("dingtalk", "debug-key");
+
+        assertEquals(Response.Status.UNAUTHORIZED, response.status());
+        Map<String, Object> entity = response.body();
+        assertEquals("login_required", entity.get("error"));
+        assertFalse(entity.toString().contains("dingtalk_idp_not_found"));
+        assertFalse(entity.toString().contains("debug-key"));
     }
 
     private static RealmModel realmWithName(String name) {

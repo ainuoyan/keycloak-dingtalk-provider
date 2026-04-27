@@ -9,7 +9,8 @@
 重点审计方向：
 
 - 企业用户校验是否发生在匹配、绑定、自动创建前。
-- 浏览器公开入口是否必须开启 GET 调试开关并校验调试密钥。
+- `/endpoints` 接口地址页面和浏览器执行型入口是否要求 Keycloak 已登录用户，未登录时是否不会枚举钉钉 IdP alias 或 GET 调试开关状态。
+- 浏览器公开执行型入口是否必须开启 GET 调试开关并校验调试密钥。
 - GET 真实同步是否必须带 `confirm=RUN_DINGTALK_SYNC`。
 - 浏览器清理入口是否始终只是 dry-run。
 - 清理逻辑是否只删除 `dingtalk_created_by_sync=true` 的同步创建用户。

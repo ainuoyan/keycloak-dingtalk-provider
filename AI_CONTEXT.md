@@ -25,7 +25,7 @@
 | `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkUserSyncTask.java` | 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run、创建、绑定、更新、重新启用、禁用离职用户 |
 | `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncAdminResource.java` | 管理端 REST 入口，需要 `manage-users` 权限 |
 | `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncAdminResourceProvider*.java` | 管理端 REST Provider 和 Factory，注册 `/admin/realms/{realm}/dingtalk-sync/...` |
-| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncBrowserResource.java` | 浏览器公开地址页面和执行入口；执行入口不需要 Bearer token，但必须开启 GET 调试开关并提供调试密钥 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncBrowserResource.java` | 浏览器接口地址页面和公开执行入口；页面和执行入口都要求 Keycloak 已登录用户，执行入口不需要 Admin Bearer token，但必须开启 GET 调试开关并提供调试密钥 |
 | `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncBrowserResourceProvider*.java` | 浏览器公开 REST Provider 和 Factory，注册 `/realms/{realm}/dingtalk-sync/...` |
 | `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.java` | 清理由钉钉同步自动创建的 Keycloak 用户 |
 | `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkCreatedUserInitializer.java` | 同步创建提交后，在独立事务中初始化临时密码、强制首次改密、启用用户，并在激活后保存中文姓名拆分元数据 |
@@ -121,16 +121,19 @@
 
 - `DELETE_DINGTALK_SYNC_CREATED_USERS`
 
-### 浏览器公开入口
+### 浏览器接口地址页面与公开入口
 
-浏览器公开执行入口位于 `/realms/{realm}/dingtalk-sync/...`，不走 Admin Bearer token，因此同步、清理预览和 Webhook 测试必须严格受以下条件保护：
+`GET /realms/{realm}/dingtalk-sync/endpoints` 接口地址页面只生成和展示地址，不触发任何同步、清理或发信动作，但必须先通过 Keycloak identity cookie 校验；未登录请求返回 `401`，且不能枚举钉钉 IdP alias 或暴露 GET 调试开关状态。该页面不校验调试开关和密钥，页面中生成的浏览器执行地址仍然必须经过下述保护。
 
+浏览器公开执行入口位于 `/realms/{realm}/dingtalk-sync/...`，不走 Admin Bearer token，但必须在浏览器已登录该路径所属 Realm 的 Keycloak 会话中执行；同步、清理预览和 Webhook 测试必须严格受以下条件保护：
+
+- 请求必须通过 Keycloak identity cookie 校验；未登录时直接返回 `401 login_required`，且不能先枚举 IdP alias。
 - IdP 必须启用 `syncGetDebugEnabled=true`
 - IdP 必须配置非空 `browserSyncDebugKey`
 - 请求必须带正确 `key`
 - 真实同步必须额外带 `confirm=RUN_DINGTALK_SYNC`
 
-`/endpoints` 页面只生成和展示地址，不触发任何同步、清理或发信动作，因此不校验调试开关和密钥；页面中生成的浏览器执行地址仍然必须经过上述保护。浏览器清理入口永远只返回 dry-run，不执行删除。
+浏览器清理入口永远只返回 dry-run，不执行删除。
 
 关键位置：
 
@@ -187,18 +190,18 @@
 
 ### 浏览器公开入口
 
-这些入口位于 `/realms/{realm}/dingtalk-sync/...`，不需要 Admin Bearer token，但必须满足浏览器公开入口保护条件。
+这些入口位于 `/realms/{realm}/dingtalk-sync/...`。`/endpoints` 页面和执行型入口都需要 Keycloak 已登录用户；执行型入口不需要 Admin Bearer token，但必须满足浏览器公开入口保护条件。
 
 | 方法和路径 | 行为 |
 |-----------|------|
-| `GET /endpoints?alias={alias}&key={debugKey}` | 显示接口地址页面；`alias` 和 `key` 可选，只生成和展示地址，不执行同步、清理或发信；`{realm}` 来自 `/realms/<realm>/...` 请求路径 |
-| `GET /debug?alias={alias}&key={debugKey}` | dry-run 同步预览 |
-| `GET /run?alias={alias}&key={debugKey}&confirm=RUN_DINGTALK_SYNC` | 真实同步 |
-| `GET /cleanup-sync-created-users?alias={alias}&key={debugKey}` | dry-run 清理预览 |
-| `POST /cleanup-sync-created-users?alias={alias}&key={debugKey}` | dry-run 清理预览，不删除 |
-| `GET /test-webhook?alias={alias}&key={debugKey}` | 发送钉钉机器人测试消息 |
+| `GET /endpoints?alias={alias}&key={debugKey}` | 显示接口地址页面；要求 Keycloak 已登录用户；`alias` 和 `key` 可选，只生成和展示地址，不执行同步、清理或发信；`{realm}` 来自 `/realms/<realm>/...` 请求路径 |
+| `GET /debug?alias={alias}&key={debugKey}` | 已登录浏览器会话中的 dry-run 同步预览 |
+| `GET /run?alias={alias}&key={debugKey}&confirm=RUN_DINGTALK_SYNC` | 已登录浏览器会话中的真实同步 |
+| `GET /cleanup-sync-created-users?alias={alias}&key={debugKey}` | 已登录浏览器会话中的 dry-run 清理预览 |
+| `POST /cleanup-sync-created-users?alias={alias}&key={debugKey}` | 已登录浏览器会话中的 dry-run 清理预览，不删除 |
+| `GET /test-webhook?alias={alias}&key={debugKey}` | 已登录浏览器会话中发送钉钉机器人测试消息 |
 
-后台 Identity Provider 配置页会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这个固定路径直接内置在插件 JAR 的 `ProviderConfigProperty.URL_TYPE` 默认值里；为适配 Keycloak 26 管理台 `URL_TYPE` 只从表单对象 `value` 字段生成链接的行为，插件会在钉钉 IdP config 中补齐 `dingtalkEndpointReferencePage` 和 `value` 固定值，但这些值只用于后台链接展示，不参与同步运行配置。浏览器会按当前站点域名解析该路径。该后台入口不含 `{realm}`，只作为页面入口。页面内部负责切换 Realm、选择 IdP、临时填写本次调试密钥，并把地址分成两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。提交不同 Realm 时服务端会跳转到对应 `/realms/<realm>/dingtalk-sync/endpoints`，真实接口地址由所选 Realm 的 REST Provider 路由决定。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此插件页面承载访问和复制按钮。入口路径只用于后台展示，插件执行同步时不会读取它。
+后台 Identity Provider 配置页会显示一个固定的“接口地址页面入口”：`/realms/master/dingtalk-sync/endpoints`。这个固定路径直接内置在插件 JAR 的 `ProviderConfigProperty.URL_TYPE` 默认值里；为适配 Keycloak 26 管理台 `URL_TYPE` 只从表单对象 `value` 字段生成链接的行为，插件会在钉钉 IdP config 中补齐 `dingtalkEndpointReferencePage` 和 `value` 固定值，但这些值只用于后台链接展示，不参与同步运行配置。浏览器会按当前站点域名解析该路径。该后台入口不含 `{realm}`，只作为页面入口；打开页面前必须已登录该路径所属 Realm。页面内部负责切换 Realm、选择 IdP、临时填写本次调试密钥，并把地址分成两组：浏览器直接 GET 地址显示“访问”按钮，管理端 POST API 地址显示“复制地址”按钮。提交不同 Realm 时服务端会跳转到对应 `/realms/<realm>/dingtalk-sync/endpoints`，真实接口地址由所选 Realm 的 REST Provider 路由决定。Keycloak 内置“重定向 URI”的只读复制框是 Admin UI 前端硬编码组件，自定义 Provider 的 `ProviderConfigProperty` 不能复用该复制组件；因此插件页面承载访问和复制按钮。入口路径只用于后台展示，插件执行同步时不会读取它。
 
 ## 同步结果语义
 
@@ -275,7 +278,8 @@ jar tf dist/keycloak-dingtalk-provider.jar | rg "DingTalk(SyncAdminResource|Sync
 审计时优先检查这些点：
 
 - 非本企业钉钉用户是否可能进入匹配、绑定或创建流程。
-- 浏览器公开入口是否能绕过 `syncGetDebugEnabled` 或 `browserSyncDebugKey`。
+- 浏览器公开入口是否能绕过 Keycloak identity cookie、`syncGetDebugEnabled` 或 `browserSyncDebugKey`。
+- `/endpoints` 页面和执行型浏览器入口是否要求 Keycloak 已登录用户，未登录时是否不枚举 IdP alias 或调试开关状态。
 - 浏览器公开入口是否可能执行删除。
 - 真实同步是否需要确认参数，尤其是 GET 真实同步。
 - 清理同步创建用户是否可能删除既有 AD/Keycloak 用户。

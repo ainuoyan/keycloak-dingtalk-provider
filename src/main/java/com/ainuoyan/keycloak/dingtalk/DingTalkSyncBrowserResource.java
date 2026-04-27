@@ -21,6 +21,8 @@ import org.jboss.logging.Logger;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.services.managers.AppAuthManager;
+import org.keycloak.services.managers.AuthenticationManager;
 
 public class DingTalkSyncBrowserResource {
 
@@ -44,6 +46,10 @@ public class DingTalkSyncBrowserResource {
                     .type(MediaType.TEXT_PLAIN_TYPE)
                     .entity("Realm not found")
                     .build();
+        }
+        Response loginRequired = requireEndpointsPageLogin(realm);
+        if (loginRequired != null) {
+            return loginRequired;
         }
         String requestedRealmName = StringUtils.trimToNull(requestedRealm);
         if (requestedRealmName != null && !requestedRealmName.equals(realm.getName())) {
@@ -88,6 +94,10 @@ public class DingTalkSyncBrowserResource {
         RealmModel realm = session.getContext().getRealm();
         if (realm == null) {
             return json(Response.Status.NOT_FOUND, Map.of("error", "realm_not_found"));
+        }
+        Response loginRequired = requireBrowserApiLogin(realm);
+        if (loginRequired != null) {
+            return loginRequired;
         }
         if (StringUtils.isBlank(alias)) {
             return json(Response.Status.BAD_REQUEST, Map.of("error", "alias_required"));
@@ -142,6 +152,10 @@ public class DingTalkSyncBrowserResource {
         if (realm == null) {
             return json(Response.Status.NOT_FOUND, Map.of("error", "realm_not_found"));
         }
+        Response loginRequired = requireBrowserApiLogin(realm);
+        if (loginRequired != null) {
+            return loginRequired;
+        }
         if (StringUtils.isBlank(alias)) {
             return json(Response.Status.BAD_REQUEST, Map.of("error", "alias_required"));
         }
@@ -189,6 +203,10 @@ public class DingTalkSyncBrowserResource {
         RealmModel realm = session.getContext().getRealm();
         if (realm == null) {
             return new BrowserJsonResponse(Response.Status.NOT_FOUND, Map.of("error", "realm_not_found"));
+        }
+        BrowserJsonResponse loginRequired = browserApiLoginGuard(realm);
+        if (loginRequired != null) {
+            return loginRequired;
         }
         try {
             IdentityProviderModel idp = getAuthorizedDingTalkProvider(realm, alias, key);
@@ -275,6 +293,50 @@ public class DingTalkSyncBrowserResource {
     private IdentityProviderModel getAuthorizedDingTalkProvider(RealmModel realm, String alias, String key) {
         IdentityProviderModel idp = getDingTalkProvider(realm, alias);
         return idp != null && validateBrowserAccess(realm, idp, alias, key) == null ? idp : null;
+    }
+
+    private Response requireEndpointsPageLogin(RealmModel realm) {
+        BrowserHtmlResponse response = endpointsPageLoginGuard(realm);
+        if (response == null) {
+            return null;
+        }
+        return Response.status(response.status())
+                .type(MediaType.TEXT_HTML + "; charset=UTF-8")
+                .header("Cache-Control", "no-store")
+                .header("Content-Security-Policy",
+                        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
+                .header("Pragma", "no-cache")
+                .entity(response.body())
+                .build();
+    }
+
+    BrowserHtmlResponse endpointsPageLoginGuard(RealmModel realm) {
+        if (authenticateBrowserRequest(realm) != null) {
+            return null;
+        }
+        logger.warnf("Rejected DingTalk endpoints page request because user is not logged in. realm=%s",
+                realm.getName());
+        return new BrowserHtmlResponse(Response.Status.UNAUTHORIZED, renderLoginRequiredPage(realm));
+    }
+
+    private Response requireBrowserApiLogin(RealmModel realm) {
+        BrowserJsonResponse response = browserApiLoginGuard(realm);
+        return response == null ? null : json(response.status(), response.body());
+    }
+
+    BrowserJsonResponse browserApiLoginGuard(RealmModel realm) {
+        if (authenticateBrowserRequest(realm) != null) {
+            return null;
+        }
+        logger.warnf("Rejected DingTalk browser API request because user is not logged in. realm=%s",
+                realm.getName());
+        return new BrowserJsonResponse(Response.Status.UNAUTHORIZED,
+                Map.of("error", "login_required",
+                        "message", "Login to Keycloak before using DingTalk browser endpoints."));
+    }
+
+    AuthenticationManager.AuthResult authenticateBrowserRequest(RealmModel realm) {
+        return new AppAuthManager().authenticateIdentityCookie(session, realm);
     }
 
     private Response validateBrowserAccess(RealmModel realm, IdentityProviderModel idp, String alias, String key) {
@@ -431,6 +493,21 @@ public class DingTalkSyncBrowserResource {
         return html.toString();
     }
 
+    private String renderLoginRequiredPage(RealmModel realm) {
+        return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<title>需要登录</title>"
+                + "<style>"
+                + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;background:#f6f7f9;color:#151515}"
+                + "main{max-width:720px;margin:0 auto;padding:48px 20px}"
+                + ".panel{background:#fff;border:1px solid #d8d8d8;border-radius:6px;padding:22px}"
+                + "h1{font-size:22px;margin:0 0 10px}p{line-height:1.6;margin:0;color:#555}"
+                + "</style></head><body><main><section class=\"panel\"><h1>需要先登录 Keycloak</h1><p>访问 Realm "
+                + "<strong>" + escapeHtml(realm.getName()) + "</strong> 的钉钉同步接口地址页面前，请先登录。"
+                + "此页面不会向未登录请求展示钉钉 Identity Provider alias 或调试开关状态。</p>"
+                + "</section></main></body></html>";
+    }
+
     private Response redirectToRealmEndpoint(RealmModel currentRealm, String requestedRealm, String alias, String key,
                                              UriInfo uriInfo) {
         String base = externalServerRoot(uriInfo, currentRealm) + "/realms/" + urlEncodePath(requestedRealm) + "/"
@@ -534,6 +611,8 @@ public class DingTalkSyncBrowserResource {
     }
 
     record BrowserJsonResponse(Response.Status status, Map<String, Object> body) {}
+
+    record BrowserHtmlResponse(Response.Status status, String body) {}
 
     private record EndpointRow(String name, String method, String url, String note, String openUrl, boolean dangerous) {}
 }
