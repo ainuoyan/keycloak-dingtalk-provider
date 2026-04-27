@@ -1,4 +1,4 @@
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;

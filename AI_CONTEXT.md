@@ -20,20 +20,20 @@
 
 | 文件 | 作用 |
 |------|------|
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkIdentityProvider.java` | 钉钉 OAuth 登录、企业用户校验、登录时匹配/创建/更新用户、企业角色授予 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkIdentityProviderFactory.java` | Keycloak Provider 配置项、固定 URL 参考字段、定时同步任务注册 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkUserSyncTask.java` | 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run、创建、绑定、更新、重新启用、禁用离职用户 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncAdminResource.java` | 管理端 REST 入口，需要 `manage-users` 权限 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncAdminResourceProvider*.java` | 管理端 REST Provider 和 Factory，注册 `/admin/realms/{realm}/dingtalk-sync/...` |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResource.java` | 浏览器公开地址页面和执行入口；执行入口不需要 Bearer token，但必须开启 GET 调试开关并提供调试密钥 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResourceProvider*.java` | 浏览器公开 REST Provider 和 Factory，注册 `/realms/{realm}/dingtalk-sync/...` |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.java` | 清理由钉钉同步自动创建的 Keycloak 用户 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkCreatedUserInitializer.java` | 同步创建提交后，在独立事务中初始化临时密码、强制首次改密、启用用户，并在激活后保存中文姓名拆分元数据 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkWebhookNotifier.java` | 钉钉自定义机器人通知，支持加签、登录创建通知和同步批量通知 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkLoginEventListenerProvider.java` | 登录/注册事件监听，给历史钉钉用户补齐企业插件角色 |
-| `src/main/java/com/tencent/keycloak/dingtalk/DingTalkLoginEventListenerProviderFactory.java` | 登录/注册事件监听 Factory |
-| `src/main/java/com/tencent/keycloak/dingtalk/PinyinUsername.java` | 中文姓名转拼音 username 规则 |
-| `src/main/java/com/tencent/keycloak/dingtalk/UserDto.java` / `UserTokenDto.java` | 钉钉用户信息和 token 响应 DTO |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkIdentityProvider.java` | 钉钉 OAuth 登录、企业用户校验、登录时匹配/创建/更新用户、企业角色授予 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkIdentityProviderFactory.java` | Keycloak Provider 配置项、固定 URL 参考字段、定时同步任务注册 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkUserSyncTask.java` | 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run、创建、绑定、更新、重新启用、禁用离职用户 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncAdminResource.java` | 管理端 REST 入口，需要 `manage-users` 权限 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncAdminResourceProvider*.java` | 管理端 REST Provider 和 Factory，注册 `/admin/realms/{realm}/dingtalk-sync/...` |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncBrowserResource.java` | 浏览器公开地址页面和执行入口；执行入口不需要 Bearer token，但必须开启 GET 调试开关并提供调试密钥 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncBrowserResourceProvider*.java` | 浏览器公开 REST Provider 和 Factory，注册 `/realms/{realm}/dingtalk-sync/...` |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.java` | 清理由钉钉同步自动创建的 Keycloak 用户 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkCreatedUserInitializer.java` | 同步创建提交后，在独立事务中初始化临时密码、强制首次改密、启用用户，并在激活后保存中文姓名拆分元数据 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkWebhookNotifier.java` | 钉钉自定义机器人通知，支持加签、登录创建通知和同步批量通知 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkLoginEventListenerProvider.java` | 登录/注册事件监听，给历史钉钉用户补齐企业插件角色 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/DingTalkLoginEventListenerProviderFactory.java` | 登录/注册事件监听 Factory |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/PinyinUsername.java` | 中文姓名转拼音 username 规则 |
+| `src/main/java/com/ainuoyan/keycloak/dingtalk/UserDto.java` / `UserTokenDto.java` | 钉钉用户信息和 token 响应 DTO |
 | `src/main/resources/META-INF/services/*` | Keycloak SPI 服务注册文件 |
 | `README.md` | 用户文档、配置说明、接口说明 |
 | `AGENTS.md` / `CLAUDE.md` | AI 工具入口说明，必须和 `AI_CONTEXT.md` 的边界保持一致 |

@@ -1,4 +1,4 @@
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;

@@ -1,4 +1,4 @@
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import org.keycloak.Config;
 import org.keycloak.events.EventListenerProvider;

@@ -1,4 +1,4 @@
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.credential.CredentialInput;
@@ -1121,6 +1122,70 @@ class DingTalkIdentityProviderTest {
                         "Can't import user because email 'employee@example.com' already exists; mobile 13800000000"));
         assertFalse(duplicateEmailText.contains("employee@example.com"));
         assertFalse(duplicateEmailText.contains("13800000000"));
+    }
+
+    @Test
+    void browserCleanupPreviewHidesStorageExceptionMessage() {
+        IdentityProviderModel idp = new IdentityProviderModel();
+        idp.setAlias("dingtalk");
+        idp.setProviderId(DingTalkIdentityProviderFactory.PROVIDER_ID);
+        idp.setEnabled(true);
+        idp.setConfig(Map.of(
+                DingTalkIdentityProviderFactory.SYNC_GET_DEBUG_ENABLED, "true",
+                DingTalkIdentityProviderFactory.BROWSER_SYNC_DEBUG_KEY, "secret-key"));
+
+        RuntimeException storageFailure = new RuntimeException(
+                "LDAP failure mobile=13800000000 email=employee@example.com access_token=token-123");
+        UserProvider users = (UserProvider) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {UserProvider.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "searchForUserByUserAttributeStream" -> throw storageFailure;
+                    case "toString" -> "users";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        RealmModel realm = (RealmModel) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {RealmModel.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getName" -> "master";
+                    case "getIdentityProvidersStream" -> Stream.of(idp);
+                    case "toString" -> "master";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        KeycloakContext context = (KeycloakContext) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {KeycloakContext.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getRealm" -> realm;
+                    case "toString" -> "context";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        KeycloakSession session = (KeycloakSession) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {KeycloakSession.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getContext" -> context;
+                    case "users" -> users;
+                    case "toString" -> "session";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+
+        DingTalkSyncBrowserResource.BrowserJsonResponse response = new DingTalkSyncBrowserResource(session)
+                .previewSyncCreatedUserCleanupJson("dingtalk", "secret-key");
+
+        assertEquals(Response.Status.INTERNAL_SERVER_ERROR, response.status());
+        Map<String, Object> entity = response.body();
+        assertEquals("cleanup_preview_failed", entity.get("error"));
+        assertEquals("dingtalk", entity.get("alias"));
+        assertEquals(true, entity.get("dryRun"));
+        assertEquals("Cleanup preview failed. Check Keycloak server logs for details.", entity.get("message"));
+
+        String entityText = entity.toString();
+        assertFalse(entityText.contains("13800000000"));
+        assertFalse(entityText.contains("employee@example.com"));
+        assertFalse(entityText.contains("token-123"));
+        assertFalse(entityText.contains("LDAP failure"));
     }
 
     private static RealmModel realmWithName(String name) {

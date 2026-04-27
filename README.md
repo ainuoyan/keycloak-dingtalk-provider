@@ -34,7 +34,7 @@
 
 ```
 keycloak-dingtalk-provider/
-├── src/main/java/com/tencent/keycloak/dingtalk/
+├── src/main/java/com/ainuoyan/keycloak/dingtalk/
 │   ├── DingTalkIdentityProvider.java                   # 钉钉 OAuth 登录、企业用户校验、登录链路匹配/创建/更新
 │   ├── DingTalkIdentityProviderFactory.java            # Identity Provider 配置项、固定 URL 参考字段、定时任务注册
 │   ├── DingTalkUserSyncTask.java                       # 钉钉通讯录同步主逻辑，支持 periodic/manual/dry-run
@@ -52,7 +52,7 @@ keycloak-dingtalk-provider/
 │   ├── PinyinUsername.java                             # 中文姓名转拼音 username 规则
 │   ├── UserDto.java                                    # 用户信息 DTO
 │   └── UserTokenDto.java                               # Token 响应 DTO
-├── src/test/java/com/tencent/keycloak/dingtalk/
+├── src/test/java/com/ainuoyan/keycloak/dingtalk/
 │   ├── DingTalkIdentityProviderTest.java
 │   └── DingTalkLoginEventListenerProviderTest.java
 ├── src/main/resources/META-INF/services/
@@ -517,14 +517,14 @@ jar tf dist/keycloak-dingtalk-provider.jar | grep -E "(DingTalk|fastjson|pinyin4
 ```
 
 预期输出应包含：
-- `com/tencent/keycloak/dingtalk/DingTalkIdentityProvider.class`
-- `com/tencent/keycloak/dingtalk/DingTalkIdentityProviderFactory.class`
-- `com/tencent/keycloak/dingtalk/DingTalkUserSyncTask.class`
-- `com/tencent/keycloak/dingtalk/DingTalkSyncAdminResource.class`
-- `com/tencent/keycloak/dingtalk/DingTalkSyncBrowserResource.class`
-- `com/tencent/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.class`
-- `com/tencent/keycloak/dingtalk/DingTalkCreatedUserInitializer.class`
-- `com/tencent/keycloak/dingtalk/DingTalkWebhookNotifier.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkIdentityProvider.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkIdentityProviderFactory.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkUserSyncTask.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkSyncAdminResource.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkSyncBrowserResource.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkSyncCreatedUserCleanup.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkCreatedUserInitializer.class`
+- `com/ainuoyan/keycloak/dingtalk/DingTalkWebhookNotifier.class`
 - `META-INF/services/org.keycloak.services.resource.RealmResourceProviderFactory`
 - `META-INF/services/org.keycloak.services.resources.admin.ext.AdminRealmResourceProviderFactory`
 - `com/alibaba/fastjson2/...`
@@ -792,7 +792,7 @@ docker restart keycloak
 
 ### 性能特性
 
-- **JAR 大小**：约 2.3MB（包含 fastjson2、pinyin4j 等插件运行所需依赖；Keycloak 运行时依赖由 Keycloak 提供）
+- **JAR 大小**：约 2.5MB（包含 fastjson2、pinyin4j 等插件运行所需依赖；Keycloak 运行时依赖由 Keycloak 提供）
 - **编译时间**：约 30 秒
 - **部署时间**：< 5 秒
 - **Provider 加载**：< 1 秒

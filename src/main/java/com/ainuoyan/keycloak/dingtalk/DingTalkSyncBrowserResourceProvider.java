@@ -1,4 +1,4 @@
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.resource.RealmResourceProvider;

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import com.alibaba.fastjson2.JSON;
 import com.fasterxml.jackson.databind.JsonNode;

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import java.util.ArrayList;
 import java.util.HashMap;

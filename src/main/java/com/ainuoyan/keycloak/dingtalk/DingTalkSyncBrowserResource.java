@@ -1,4 +1,4 @@
-package com.tencent.keycloak.dingtalk;
+package com.ainuoyan.keycloak.dingtalk;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -181,26 +181,47 @@ public class DingTalkSyncBrowserResource {
     }
 
     private Response previewSyncCreatedUserCleanup(String alias, String key) {
-        RealmModel realm = session.getContext().getRealm();
-        IdentityProviderModel idp = getAuthorizedDingTalkProvider(realm, alias, key);
-        if (idp == null) {
-            return json(Response.Status.FORBIDDEN, Map.of("error", "unauthorized_or_not_found"));
-        }
+        BrowserJsonResponse response = previewSyncCreatedUserCleanupJson(alias, key);
+        return json(response.status(), response.body());
+    }
 
-        DingTalkSyncCreatedUserCleanup.CleanupResult result =
-                DingTalkSyncCreatedUserCleanup.preview(session, realm, idp);
-        return Response.ok(Map.of(
-                "alias", result.alias(),
-                "dryRun", true,
-                "candidateCount", result.candidateCount(),
-                "usernames", result.usernames(),
-                "deleteMethod", "POST admin endpoint",
-                "confirm", DingTalkSyncCreatedUserCleanup.CONFIRM,
-                "adminPath", "/admin/realms/" + realm.getName()
-                        + "/dingtalk-sync/cleanup-sync-created-users?alias=" + alias
-                        + "&confirm=" + DingTalkSyncCreatedUserCleanup.CONFIRM,
-                "message", "Browser cleanup endpoint is preview-only. Use the admin endpoint to delete DingTalk sync-created users."
-        ), MediaType.APPLICATION_JSON_TYPE).build();
+    BrowserJsonResponse previewSyncCreatedUserCleanupJson(String alias, String key) {
+        RealmModel realm = session.getContext().getRealm();
+        if (realm == null) {
+            return new BrowserJsonResponse(Response.Status.NOT_FOUND, Map.of("error", "realm_not_found"));
+        }
+        try {
+            IdentityProviderModel idp = getAuthorizedDingTalkProvider(realm, alias, key);
+            if (idp == null) {
+                return new BrowserJsonResponse(Response.Status.FORBIDDEN,
+                        Map.of("error", "unauthorized_or_not_found"));
+            }
+
+            DingTalkSyncCreatedUserCleanup.CleanupResult result =
+                    DingTalkSyncCreatedUserCleanup.preview(session, realm, idp);
+            return new BrowserJsonResponse(Response.Status.OK, Map.of(
+                    "alias", result.alias(),
+                    "dryRun", true,
+                    "candidateCount", result.candidateCount(),
+                    "usernames", result.usernames(),
+                    "deleteMethod", "POST admin endpoint",
+                    "confirm", DingTalkSyncCreatedUserCleanup.CONFIRM,
+                    "adminPath", "/admin/realms/" + realm.getName()
+                            + "/dingtalk-sync/cleanup-sync-created-users?alias=" + alias
+                            + "&confirm=" + DingTalkSyncCreatedUserCleanup.CONFIRM,
+                    "message", "Browser cleanup endpoint is preview-only. "
+                            + "Use the admin endpoint to delete DingTalk sync-created users."
+            ));
+        } catch (Exception e) {
+            logger.errorf("DingTalk browser cleanup preview failed. realm=%s, idp=%s, error=%s, reason=%s",
+                    realm.getName(), StringUtils.defaultString(alias), e.getClass().getName(),
+                    DingTalkIdentityProvider.sanitizeForLog(e.getMessage()));
+            return new BrowserJsonResponse(Response.Status.INTERNAL_SERVER_ERROR,
+                    Map.of("error", "cleanup_preview_failed",
+                            "alias", StringUtils.defaultString(alias),
+                            "dryRun", true,
+                            "message", "Cleanup preview failed. Check Keycloak server logs for details."));
+        }
     }
 
     private Response json(Response.Status status, Map<String, Object> body) {
@@ -511,6 +532,8 @@ public class DingTalkSyncBrowserResource {
                 .replace("\"", "&quot;")
                 .replace("'", "&#39;");
     }
+
+    record BrowserJsonResponse(Response.Status status, Map<String, Object> body) {}
 
     private record EndpointRow(String name, String method, String url, String note, String openUrl, boolean dangerous) {}
 }
