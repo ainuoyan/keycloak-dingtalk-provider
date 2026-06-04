@@ -303,6 +303,13 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             String matchSource = matchResult.source();
             Optional<ProvisionResult> provisionResult = Optional.empty();
             boolean createdThisSync = false;
+            if (user == null && reenableUsers) {
+                UserModel returningUser = findReenableCandidateByUsernameCandidates(session, realm, dingtalkUser);
+                if (returningUser != null) {
+                    user = returningUser;
+                    matchSource = "rehire-username";
+                }
+            }
             if (user == null) {
                 if (dryRun && createUsers) {
                     String provisionedUsername = resolveProvisionedUsername(dingtalkUser);
@@ -802,6 +809,27 @@ public class DingTalkUserSyncTask implements ScheduledTask {
             }
         }
         return uniqueMatch(matches, "sync username", usernameCandidates(dingtalkUser));
+    }
+
+    UserModel findReenableCandidateByUsernameCandidates(KeycloakSession session, RealmModel realm,
+                                                        UserDto dingtalkUser) {
+        List<String> candidates = usernameCandidates(dingtalkUser);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+
+        List<UserModel> matches = new ArrayList<>();
+        for (String username : candidates) {
+            UserModel byUsername = session.users().getUserByUsername(realm, username);
+            if (isReenableCandidate(byUsername, false)
+                    && matches.stream().noneMatch(existing -> existing.getId().equals(byUsername.getId()))) {
+                matches.add(byUsername);
+                if (matches.size() > 1) {
+                    break;
+                }
+            }
+        }
+        return uniqueMatch(matches, "sync rehire username", candidates).orElse(null);
     }
 
     private boolean bindFederatedIdentityIfMissing(KeycloakSession session, RealmModel realm,

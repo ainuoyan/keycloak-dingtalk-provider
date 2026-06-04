@@ -90,6 +90,7 @@
 - 如果显式开启 `periodicSyncDisableExternalUsers=true`，会处理 LDAP/AD 等外部存储用户，但必须用本轮钉钉通讯录的 username、email、phoneNumber/mobile/telephoneNumber 命中保护仍在职用户；缺失用户扫描必须发生在本轮用户字段写入、身份绑定和 lastSync 更新时间戳写入之前，避免 Keycloak 外部用户校验和 invalid-user 清理与当前事务内的大量同步写入互相锁住。若任一 User Storage 开启 `removeInvalidUsersEnabled`，外部存储全量扫描必须跳过，避免触发 Keycloak 在同步事务内删除 invalid federated user。AD 机器账号（username 以 `$` 结尾）和 service account 不是员工离职候选，不应被禁用。
 - 启用 Webhook 时，本轮被禁用的离职账号必须汇总通知管理员；通知只允许包含 Keycloak username 和禁用原因，不输出手机号、邮箱或 LDAP DN。
 - 返聘自动重新启用只处理之前由本插件按 `missing_from_dingtalk` 禁用、且重新出现在钉钉通讯录的用户；不得启用同步刚创建或其他原因禁用的账号。
+- 返聘用户如果未被已绑定身份、手机号或邮箱命中，但本轮钉钉资料推导出的 username 候选命中了之前由本插件按 `missing_from_dingtalk` 禁用的账号，应按返聘账号处理并进入重新启用、绑定和更新流程，不应反复尝试创建同名账号；普通 username 冲突仍不得被当作可信匹配。
 - 任一部门或子部门拉取失败时，本轮不禁用任何用户。
 - 本轮没有加载到任何可用于比对的钉钉身份时不禁用。
 - Keycloak 是否能把禁用写回 AD，取决于 LDAP provider、MSAD account controls mapper 和绑定账号权限。

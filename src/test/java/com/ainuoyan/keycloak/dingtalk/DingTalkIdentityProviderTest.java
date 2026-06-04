@@ -765,6 +765,54 @@ class DingTalkIdentityProviderTest {
     }
 
     @Test
+    void rehireUsernameFallbackMatchesOnlyPreviousMissingUserDisable() {
+        DingTalkUserSyncTask task = new DingTalkUserSyncTask();
+        UserDto dingtalkUser = new UserDto();
+        dingtalkUser.setNick("张三");
+
+        Map<String, String> disabledBySyncAttributes = new HashMap<>();
+        disabledBySyncAttributes.put("enabled", "false");
+        disabledBySyncAttributes.put("dingtalk_disabled_reason", "missing_from_dingtalk");
+        UserModel disabledBySync = userWithReadOnlyAttributes("zhangsan", disabledBySyncAttributes, Set.of());
+
+        Map<String, String> plainCollisionAttributes = new HashMap<>();
+        plainCollisionAttributes.put("enabled", "false");
+        UserModel plainCollision = userWithReadOnlyAttributes("lisi", plainCollisionAttributes, Set.of());
+
+        UserProvider users = (UserProvider) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {UserProvider.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getUserByUsername" -> {
+                        String username = (String) args[1];
+                        yield switch (username) {
+                            case "zhangsan" -> disabledBySync;
+                            case "lisi" -> plainCollision;
+                            default -> null;
+                        };
+                    }
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+
+        KeycloakSession session = (KeycloakSession) Proxy.newProxyInstance(
+                DingTalkIdentityProviderTest.class.getClassLoader(),
+                new Class<?>[] {KeycloakSession.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "users" -> users;
+                    case "isClosed" -> false;
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+
+        assertSame(disabledBySync,
+                task.findReenableCandidateByUsernameCandidates(session, realmWithName("master"), dingtalkUser));
+
+        dingtalkUser.setNick("李四");
+
+        assertNull(task.findReenableCandidateByUsernameCandidates(session, realmWithName("master"), dingtalkUser));
+    }
+
+    @Test
     void activeDingTalkUsersMatchExternalUsersByStableIdentifiers() {
         DingTalkUserSyncTask task = new DingTalkUserSyncTask();
         DingTalkUserSyncTask.ActiveDingTalkUsers activeUsers = task.new ActiveDingTalkUsers();

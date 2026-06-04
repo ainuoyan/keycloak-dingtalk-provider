@@ -14,7 +14,7 @@
 - 浏览器清理入口是否始终只是 dry-run。
 - 清理逻辑是否只删除 `dingtalk_created_by_sync=true` 的同步创建用户。
 - dry-run 是否不会写入用户、绑定、lastSync 或 IdP 配置。
-- 离职禁用在部门拉取失败或本轮没有有效钉钉身份时是否跳过；外部用户缺失扫描是否发生在本轮同步写入之前，是否在 User Storage 开启 `removeInvalidUsersEnabled` 时跳过外部全量扫描，是否排除 AD 机器账号和 service account，避免 Keycloak LDAP federated validation / invalid-user 删除与同步写入互相锁住；返聘重新启用是否只处理本插件按 `missing_from_dingtalk` 禁用的用户；禁用结果是否发送 Webhook 且不泄露手机号、邮箱或 LDAP DN。
+- 离职禁用在部门拉取失败或本轮没有有效钉钉身份时是否跳过；外部用户缺失扫描是否发生在本轮同步写入之前，是否在 User Storage 开启 `removeInvalidUsersEnabled` 时跳过外部全量扫描，是否排除 AD 机器账号和 service account，避免 Keycloak LDAP federated validation / invalid-user 删除与同步写入互相锁住；返聘重新启用是否只处理本插件按 `missing_from_dingtalk` 禁用的用户，且 username 候选只用于命中这类返聘账号，不能放宽为普通 username 冲突绑定；禁用结果是否发送 Webhook 且不泄露手机号、邮箱或 LDAP DN。
 - 日志是否避免泄露手机号、邮箱、token、secret 和 OAuth code/state。
 - 浏览器公开入口失败时是否避免向调用方返回原始异常 message。
 - 钉钉机器人通知是否只在真实执行事务提交后发送成功类通知，创建成功通知是否会在提交后重新按 username 确认用户可检索，事务回滚或不可检索时是否改发告警；创建/跳过创建/同步失败告警是否脱敏且正文标签中文化，发送失败是否不会中断登录或同步。
